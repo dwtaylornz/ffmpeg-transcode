@@ -1,16 +1,15 @@
 
 function Get-VideoCodec ([string] $video_path) {
-    #Write-Host "Check if file is HEVC first..."
-    $video_codec = $null
     $video_codec = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`")
-    if (Select-String -pattern "hevc" -InputObject $video_codec -quiet) { $video_codec = "hevc" }
-    if (Select-String -pattern "h264" -InputObject $video_codec -quiet) { $video_codec = "h264" } 
-    if (Select-String -pattern "vc1" -InputObject $video_codec -quiet) { $video_codec = "vc1" }          
-    if (Select-String -pattern "mpeg2video" -InputObject $video_codec -quiet) { $video_codec = "mpeg2video" }
-    if (Select-String -pattern "mpeg4" -InputObject $video_codec -quiet) { $video_codec = "mpeg4" }
-    if (Select-String -pattern "rawvideo" -InputObject $video_codec -quiet) { $video_codec = "rawvideo" }
-    if (Select-String -pattern "vp9" -InputObject $video_codec -quiet) { $video_codec = "vp9" }
-    if (Select-String -pattern "av1" -InputObject $video_codec -quiet) { $video_codec = "av1" }
+    $codec_patterns = "hevc", "h264", "vc1", "mpeg2video", "mpeg4", "rawvideo", "vp9", "av1"
+
+    foreach ($pattern in $codec_patterns) {
+        if (Select-String -pattern $pattern -InputObject $video_codec -quiet) { 
+            $video_codec = $pattern
+            break
+        }
+    }
+
     return $video_codec
 }
 
@@ -28,15 +27,18 @@ function Get-AudioChannels ([string] $video_path) {
 }
 
 function Get-VideoWidth ([string] $video_path) {
-    #check video width (1920 width is more consistant for 1080p videos)
-    $video_width = $null 
     $video_width = (.\ffprobe.exe -loglevel quiet -show_entries stream=width -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String
-    if (Select-String -pattern "N/A" -InputObject $video_width -quiet) { $video_width = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String }   
-    $video_width = $video_width.trim()
-    $video_width = $video_width.Split("")[0]
-    if (Select-String -pattern "1920" -InputObject $video_width -quiet) { $video_width = "1920" }   
-    try {  $video_width = [Int]$video_width }
-    catch { write-host "  "$video.name" width issue"}
+    if ($video_width -eq "N/A") { 
+        $video_width = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String 
+    }   
+    $video_width = $video_width.trim().Split("")[0]
+    if ($video_width -eq "1920") { $video_width = "1920" }   
+    try {  
+        $video_width = [Int]$video_width 
+    }
+    catch { 
+        Write-Host "  $video_path width issue"
+    }
     return $video_width
 }
 
@@ -75,24 +77,12 @@ function Show-State() {
     Write-Host "Previously processed files: $($skipped_files.Count)" 
     Write-Host "Previously errored files: $($skippederror_files.Count)" 
     Write-Host "Existing HEVC files: $($skippedhevc_files.Count)" 
-    Write-Host ""    
-    Write-Host "Total files to skip: $skiptotal_count"
-    Write-Host ""
-    Write-Host -NoNewLine "Settings - " 
-    Write-Host -NoNewline "Encoding: "
-    Write-Host -NoNewLine -ForegroundColor Green "$ffmpeg_codec"
-    if ($ffmpeg_hwdec -eq 0) {
-        Write-Host -NoNewline " Decoding: "
-        Write-Host -noNewLine -ForegroundColor Green "CPU"
-    }
-    if ($ffmpeg_hwdec -eq 1) {
-        Write-Host -NoNewline " GPU Decoding: "
-        Write-Host -noNewLine -ForegroundColor Green "GPU"
-    }
-    Write-Host ""    
-    Write-Host ""   
-         
-    if ((get-job -State Running -ea silentlycontinue) ) {
+    Write-Host "`nTotal files to skip: $skiptotal_count`n"
+    
+    $decoding = if ($ffmpeg_hwdec -eq 0) { "CPU" } else { "GPU" }
+    Write-Host "Settings - Encoding: $($ffmpeg_codec) Decoding: $decoding`n"
+
+    if ((get-job -State Running -ea silentlycontinue)) {
         Write-Host "Currently Running Jobs - "
         get-job -State Running 
         Write-Host ""
@@ -118,108 +108,76 @@ function Invoke-ColorFix() {
 
 # File stuff 
 function Get-Videos() {
-    # get-job -State Completed | Remove-Job
     get-job -Name Scan -ea silentlycontinue | Stop-Job -ea silentlycontinue | Out-Null  
+
     if (-not(test-path -PathType leaf $log_path\scan_results.csv) -or $scan_at_start -eq 1) { 
         Write-Host  -NoNewline "Running file scan... " 
         Start-Job -Name "Scan" -FilePath .\include\job_media_scan.ps1 -ArgumentList $RootDir | Out-Null
         Receive-Job -name "Scan" -wait -Force
         Start-Sleep 2 
-        $videos = @(Import-Csv -Path $log_path\scan_results.csv -Encoding utf8)
-        Write-Host " files: " $videos.Count
     }  
-    elseif ($scan_at_start -eq 0) {
-        
+
+    $videos = @(Import-Csv -Path $log_path\scan_results.csv -Encoding utf8)
+    Write-Host " files: " $videos.Count
+
+    if ($scan_at_start -eq 0) {
         Write-Host -NoNewline "Getting previous scan results & running new scan in background: " 
-        $videos = @(Import-Csv -Path $log_path\scan_results.csv -Encoding utf8)
-        Write-Host $videos.Count
         Start-Job -Name "Scan" -FilePath .\include\job_media_scan.ps1 -ArgumentList $RootDir | Out-Null 
     }
     elseif ($scan_at_start -eq 2) {
-    
         Write-Host -NoNewline "Getting previous scan results: " 
-        $videos = @(Import-Csv -Path $log_path\scan_results.csv -Encoding utf8)
-        Write-Host $videos.Count
     }
+
     return $videos
 }
-function Get-Skip() {
-    $skipped_files = $null
-    if ((test-path -PathType leaf $log_path\skip.txt)) { 
-        $mutexName = 'Get-Skip'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
+
+function Get-ContentFromFile ([string] $filePath) {
+    $content = $null
+    if ((Test-Path -PathType leaf $filePath)) { 
+        $mutex = New-Object 'Threading.Mutex' $false, $filePath
         try {
-            $skipped_files = @(Get-Content -Path $log_path\skip.txt -Encoding utf8 -ErrorAction Stop) 
+            $mutex.WaitOne() 
+            $content = @(Get-Content -Path $filePath -Encoding utf8 -ErrorAction Stop) 
         }
         finally {
             $mutex.ReleaseMutex()
         }
     }
-    return $skipped_files
+    return $content
 }
+
+function Get-Skip() {
+    return Get-ContentFromFile "$log_path\skip.txt" 
+}
+
 function Get-SkipError() {
-    $skippederror_files = $null
-    if ((test-path -PathType leaf $log_path\skiperror.txt)) { 
-        $mutexName = 'Get-SkipError'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            $skippederror_files = @(Get-Content -Path $log_path\skiperror.txt -Encoding utf8 -ErrorAction Stop) 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }      
-    }
-    return $skippederror_files
+    return Get-ContentFromFile "$log_path\skiperror.txt" 
 }
 
 function Get-ColorFixed() {
-    $colorfixed_files = $null
-    if ((test-path -PathType leaf $log_path\skipcolorfixed.txt)) { 
-        $mutexName = 'Get-ColorFixed'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            $colorfixed_files = @(Get-Content -Path $log_path\skipcolorfixed.txt -Encoding utf8 -ErrorAction Stop) 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }      
-    }
-    return $colorfixed_files
+    return Get-ContentFromFile "$log_path\skipcolorfixed.txt" 
 }
 
-
-function Get-SkipHEVC() {
-    $skippedhevc_files = $null
-    if ((test-path -PathType leaf $log_path\skiphevc.txt)) { 
-        $mutexName = 'Get-SkipHEVC'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            $skippedhevc_files = @(Get-Content -Path $log_path\skiphevc.txt -Encoding utf8 -ErrorAction Stop)     
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }        
-    }
-    return  $skippedhevc_files
+function Get-SkipAV1() {
+    return Get-ContentFromFile "$log_path\skipav1.txt" 
 }
-function Write-Log  ([string] $LogString) {
+
+function Write-Log ([string] $LogString) {
     if ($LogString) {
         $Logfile = "$log_path\transcode.log"
         $Stamp = (Get-Date).toString("yy/MM/dd HH:mm:ss")
         $LogMessage = "$Stamp $env:computername$LogString"
-        if ($LogString -like '*transcoding*') { Write-Host "$LogMessage" -ForegroundColor Cyan }
-        elseif ($LogString -like '*ERROR*') { Write-Host "$LogMessage" -ForegroundColor Red }
-        elseif ($LogString -like '*Saved:*') { Write-Host "$LogMessage" -ForegroundColor Green }
-        elseif ($LogString -like '*Converting HEVC to MP4 container*') { Write-Host "$LogMessage" -ForegroundColor DarkGreen }
-        else { Write-Host "$LogMessage" }
-        $mutexName = 'Write-Log'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
+
+        switch ($LogString) {
+            { $_ -like '*transcoding*' } { Write-Host "$LogMessage" -ForegroundColor Cyan }
+            { $_ -like '*ERROR*' } { Write-Host "$LogMessage" -ForegroundColor Red }
+            { $_ -like '*Saved:*' } { Write-Host "$LogMessage" -ForegroundColor Green }
+            default { Write-Host "$LogMessage" }
+        }
+
+        $mutex = New-Object 'Threading.Mutex' $false, 'Write-Log'
         try {
+            $mutex.WaitOne() 
             Add-content $LogFile -value $LogMessage -Encoding utf8 -ErrorAction Stop     
         }
         finally {
@@ -227,62 +185,29 @@ function Write-Log  ([string] $LogString) {
         }       
     }
 }
+
 function Write-Skip ([string] $video_name) {
-    if ($video_name) { 
-        $Logfile = "$log_path\skip.txt"
-        $mutexName = 'Write-Skip'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-            return 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }
-    }
+    Write-LogToFile "$log_path\skip.txt" $video_name 'Write-Skip'
 }
+
 function Write-SkipError ([string] $video_name) {
-    if ($video_name) { 
-        $Logfile = "$log_path\skiperror.txt"
-        $mutexName = 'Write-SkipError'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-            return 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }
-    }
+    Write-LogToFile "$log_path\skiperror.txt" $video_name 'Write-SkipError'
 }
 
 function Write-ColorFixed ([string] $video_name) {
-    if ($video_name) { 
-        $Logfile = "$log_path\skipcolorfixed.txt"
-        $mutexName = 'Write-ColorFixed'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-            return 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }
-    }
+    Write-LogToFile "$log_path\skipcolorfixed.txt" $video_name 'Write-ColorFixed'
 }
 
-function Write-SkipHEVC ([string] $video_name) {
+function Write-SkipAV1 ([string] $video_name) {
+    Write-LogToFile "$log_path\skipav1.txt" $video_name 'Write-SkipAV1'
+}
+
+function Write-LogToFile ([string] $Logfile, [string] $video_name, [string] $mutexName) {
     if ($video_name) { 
-        $Logfile = "$log_path\skiphevc.txt"
-        $mutexName = 'Write-SkipHEVC'
         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
         try {
-            Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-            return 
+            $mutex.WaitOne() 
+            Add-content $Logfile -value $video_name -Encoding utf8 -ErrorAction Stop
         }
         finally {
             $mutex.ReleaseMutex()

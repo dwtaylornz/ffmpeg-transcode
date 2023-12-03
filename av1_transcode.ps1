@@ -1,7 +1,7 @@
 #!/usr/bin/env powershell
-# github.com/dwtaylornz/hevctranscode
+# github.com/dwtaylornz/av1transcode
 #
-# script will loop through largest to smallest videos transcoding to HEVC
+# script will loop through largest to smallest videos transcoding to AV1
 # populate variables.ps1 before running this script. 
 
 Set-Location $PSScriptRoot
@@ -27,19 +27,19 @@ $videos = Get-Videos
 Invoke-HealthCheck
 
 # run color fix job
-if ($mkv_color_fix -eq 1){Invoke-ColorFix}
+# if ($mkv_color_fix -eq 1){Invoke-ColorFix}
 
 
 # Get previously skipped files from skip.log
 $skipped_files = Get-Skip
 $skippederror_files = Get-SkipError
-$skippedhevc_files = Get-SkipHEVC
+$skippedav1_files = Get-SkipAV1
 
 #Show settings and any jobs running 
 Show-State
 
 # if single machine here - 
-$skiptotal_files = $skipped_files + $skippederror_files + $skippedhevc_files
+$skiptotal_files = $skipped_files + $skippederror_files + $skippedav1_files
 
 #Main Loop across videos 
 $queue_timer = Get-Date
@@ -51,8 +51,8 @@ Foreach ($video in $videos) {
         $videos = Get-Videos
         $skipped_files = Get-Skip
         $skippederror_files = Get-SkipError
-        $skippedhevc_files = Get-SkipHEVC
-        $skiptotal_files = $skipped_files + $skippederror_files + $skippedhevc_files
+        $skippedav1_files = Get-SkipAV1
+        $skiptotal_files = $skipped_files + $skippederror_files + $skippedav1_files
         $queue_timer = Get-Date
     }
 

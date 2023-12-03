@@ -15,18 +15,18 @@ $video_name = $video.name
 $video_path = $video.Fullname
 $video_size = [math]::Round($video.length / 1GB, 1)
 
-if ($ffmpeg_mp4 -eq 0) {
-    $video_new_name = $video.Name
-    $video_new_path = $video.Fullname
-}
-elseif ($ffmpeg_mp4 -eq 1) {
-    $video_new_name = $video.Name
-    $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
-    $video_new_name = "$video_new_name.mp4"
-    $video_new_path = $video.Fullname
-    $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
-    $video_new_path = "$video_new_path.mp4"
-}
+# if ($ffmpeg_mp4 -eq 0) {
+#     $video_new_name = $video.Name
+#     $video_new_path = $video.Fullname
+# }
+# elseif ($ffmpeg_mp4 -eq 1) {
+#     $video_new_name = $video.Name
+#     $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
+#     $video_new_name = "$video_new_name.mp4"
+#     $video_new_path = $video.Fullname
+#     $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
+#     $video_new_path = "$video_new_path.mp4"
+# }
 
 # Write-Host "Check if file is HEVC first..."
 $video_codec = Get-VideoCodec $video_path
@@ -47,9 +47,9 @@ $start_time = (GET-Date)
 Write-Skip "$video_name"
 
 # GPU Offload...
-if ($video_codec -ne "hevc" -AND $video_codec -ne "av1") {
+if ($video_codec -ne "av1") {
         
-    $transcode_msg = "transcoding to HEVC"
+    $transcode_msg = "transcoding to AV1"
 
     # NVIDIA TUNING 
     # if ($ffmpeg_codec -eq "hevc_nvenc"){$ffmpeg_codec_tune = "-pix_fmt yuv420p10le -b:v 0 -rc:v vbr"}
@@ -57,29 +57,31 @@ if ($video_codec -ne "hevc" -AND $video_codec -ne "av1") {
     if ($ffmpeg_codec -eq "av1_amf") { $ffmpeg_codec_tune = "-preset 5 -crf 25" }
     # -vf colorspace=all=bt709 -colorspace 1 -color_primaries 1 -color_trc 1
     
-    if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
-    elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
+    # if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
+    # elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
 
-    if ($ffmpeg_aac -eq 0 -OR ($audio_codec -eq "aac" -AND $audio_channels -eq 2)) { $ffmpeg_aac_cmd = "copy" }
-    elseif ($ffmpeg_aac -eq 1) {
-        $ffmpeg_aac_cmd = "aac -ac 2" 
-        $transcode_msg = "$transcode_msg + AAC (2 channel)"
-    }
-    elseif ($ffmpeg_aac -eq 2) {
-        $ffmpeg_aac_cmd = "libfdk_aac -ac 2"
-        $transcode_msg = "$transcode_msg + libfdk AAC (2 channel)"
+    switch ($ffmpeg_aac) {
+        0 { $ffmpeg_aac_cmd = "copy" }
+        1 {
+            $ffmpeg_aac_cmd = "aac -ac 2" 
+            $transcode_msg = "$transcode_msg + AAC (2 channel)"
+        }
+        2 {
+            $ffmpeg_aac_cmd = "libfdk_aac -ac 2"
+            $transcode_msg = "$transcode_msg + libfdk AAC (2 channel)"
+        }
     }
 
-    if ($ffmpeg_eng -eq 0) { $ffmpeg_eng_cmd = "0:a" }
-    elseif ($ffmpeg_eng -eq 1) {
-        $ffmpeg_eng_cmd = "0:m:language:eng?" 
-        $transcode_msg = "$transcode_msg, english only"
-    }
+    # if ($ffmpeg_eng -eq 0) { $ffmpeg_eng_cmd = "0:a" }
+    # elseif ($ffmpeg_eng -eq 1) {
+    #     $ffmpeg_eng_cmd = "0:m:language:eng?" 
+    #     $transcode_msg = "$transcode_msg, english only"
+    # }
     
     if ($convert_1080p -eq 0) { $ffmpeg_scale_cmd = "" } 
     elseif ($convert_1080p -eq 1 -AND $video_width -gt 1920) { $ffmpeg_scale_cmd = "-vf scale=1920:-1" } 
 
-    if ($ffmpeg_mp4 -eq 1) { $transcode_msg = "$transcode_msg MP4" }
+    # if ($ffmpeg_mp4 -eq 1) { $transcode_msg = "$transcode_msg MP4" }
 
     $transcode_msg = "$transcode_msg..."
     Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`) $transcode_msg"      
