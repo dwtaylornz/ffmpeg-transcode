@@ -54,7 +54,8 @@ if ($video_codec -ne "hevc" -AND $video_codec -ne "av1") {
     # NVIDIA TUNING 
     # if ($ffmpeg_codec -eq "hevc_nvenc"){$ffmpeg_codec_tune = "-pix_fmt yuv420p10le -b:v 0 -rc:v vbr"}
     # AMD TUNING - 
-    if ($ffmpeg_codec -eq "hevc_amf") { $ffmpeg_codec_tune = "-usage transcoding -quality quality -profile_tier high -header_insertion_mode idr" }
+    if ($ffmpeg_codec -eq "av1_amf") { $ffmpeg_codec_tune = "-preset 5 -crf 25" }
+    # -vf colorspace=all=bt709 -colorspace 1 -color_primaries 1 -color_trc 1
     
     if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
     elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
@@ -193,13 +194,13 @@ if (test-path -PathType leaf "output\$video_new_name") {
 }
 
 Else {   
-    if ($video_codec -eq "hevc") {
-        Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) Already HEVC, Skipping"
-        Write-SkipHEVC $video_name
-        exit
-    }
+    # if ($video_codec -eq "hevc") {
+    #     Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) Already HEVC, Skipping"
+    #     Write-SkipHEVC $video_name
+    #     exit
+    # }
 
-    elseif ($video_codec -eq "av1") {
+    if ($video_codec -eq "av1") {
         Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) Already AV1, Skipping"
         Write-SkipHEVC $video_name
         exit

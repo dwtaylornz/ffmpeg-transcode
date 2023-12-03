@@ -10,6 +10,7 @@ function Get-VideoCodec ([string] $video_path) {
     if (Select-String -pattern "mpeg4" -InputObject $video_codec -quiet) { $video_codec = "mpeg4" }
     if (Select-String -pattern "rawvideo" -InputObject $video_codec -quiet) { $video_codec = "rawvideo" }
     if (Select-String -pattern "vp9" -InputObject $video_codec -quiet) { $video_codec = "vp9" }
+    if (Select-String -pattern "av1" -InputObject $video_codec -quiet) { $video_codec = "av1" }
     return $video_codec
 }
 
@@ -207,12 +208,11 @@ function Get-SkipHEVC() {
 }
 function Write-Log  ([string] $LogString) {
     if ($LogString) {
-        $Logfile = "$log_path\hevc_transcode.log"
+        $Logfile = "$log_path\transcode.log"
         $Stamp = (Get-Date).toString("yy/MM/dd HH:mm:ss")
         $LogMessage = "$Stamp $env:computername$LogString"
         if ($LogString -like '*transcoding*') { Write-Host "$LogMessage" -ForegroundColor Cyan }
         elseif ($LogString -like '*ERROR*') { Write-Host "$LogMessage" -ForegroundColor Red }
-        elseif ($LogString -like '*Saved:*') { Write-Host "$LogMessage" -ForegroundColor Green }
         elseif ($LogString -like '*Saved:*') { Write-Host "$LogMessage" -ForegroundColor Green }
         elseif ($LogString -like '*Converting HEVC to MP4 container*') { Write-Host "$LogMessage" -ForegroundColor DarkGreen }
         else { Write-Host "$LogMessage" }
