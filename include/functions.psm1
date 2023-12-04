@@ -73,10 +73,10 @@ function Start-Delay {
 }
 
 function Show-State() {
-    $skiptotal_count = $skipped_files.Count + $skippederror_files.Count + $skippedhevc_files.Count
+    $skiptotal_count = $skipped_files.Count + $skippederror_files.Count + $skippedav1_files.Count
     Write-Host "Previously processed files: $($skipped_files.Count)" 
     Write-Host "Previously errored files: $($skippederror_files.Count)" 
-    Write-Host "Existing HEVC files: $($skippedhevc_files.Count)" 
+    Write-Host "Existing AV1 files: $($skippedav1_files.Count)" 
     Write-Host "`nTotal files to skip: $skiptotal_count`n"
     
     $decoding = if ($ffmpeg_hwdec -eq 0) { "CPU" } else { "GPU" }

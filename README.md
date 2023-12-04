@@ -1,5 +1,5 @@
 ## Reduce your media disk consumption with AV1!
-A windows powershell script to re-encode media library videos to HEVC / H265 using ffmpeg on windows with GPU acceleration. 
+A windows powershell script to re-encode media library videos to AV1 using ffmpeg on windows with GPU acceleration. 
 
 ### requirements
 - ffmpeg executables for windows (includes gpu offload) - https://ffmpeg.org/download.html
@@ -8,14 +8,14 @@ A windows powershell script to re-encode media library videos to HEVC / H265 usi
 ### usage 
 - Download and place ffmpeg tools in same folder as script (windows - reccommend full gpl nightly build. https://github.com/BtbN/FFmpeg-Builds/releases) 
 - Update variables.ps1 with your settings
-- Run hevc_transcode.ps1 in powershell 
+- Run av1_transcode.ps1 in powershell 
 
 ### warning! 
 **Script will overwrite existing source files if conversion is successfull**
 
 ### functions
 - traverses root path (scans all video files in subfolders) - as a job in background 
-- transcodes video stream to hevc using **AMD or Nvidia GPU** (largest to smallest file) 
+- transcodes video stream to av1 using **AMD or Nvidia GPU** (largest to smallest file) 
 - transcodes audio to AAC (FDK also supported), else copys all existing audio and subtitles (i.e. no conversion) 
 - overwrites source with new AV1 transcode if **move_file = 1** (WARNING this is default!) 
 - checks to see if video codec is already AV1 (if so, skips)
