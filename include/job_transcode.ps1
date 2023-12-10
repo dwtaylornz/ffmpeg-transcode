@@ -51,7 +51,7 @@ if ($video_codec -ne "av1") {
     $transcode_msg = "transcoding to AV1"
 
     # AMD TUNING - 
-    if ($ffmpeg_codec -eq "av1_amf") { $ffmpeg_codec_tune = "-preset 5 -crf 25" }
+    if ($ffmpeg_codec -eq "av1_amf") { $ffmpeg_codec_tune = "-preset 5 -crf 24" }
     # -vf colorspace=all=bt709 -colorspace 1 -color_primaries 1 -color_trc 1
     
     if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }

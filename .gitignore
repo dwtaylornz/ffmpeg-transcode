@@ -1,7 +1,5 @@
-ffmpeg.exe
-ffplay.exe
-ffprobe.exe
-scan_results.csv
-skip.txt
-transcode.log
-*.mkv
+*.exe
+*.csv
+*.txt
+*.log
+output
