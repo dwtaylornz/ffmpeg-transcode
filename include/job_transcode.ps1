@@ -15,18 +15,17 @@ $video_name = $video.name
 $video_path = $video.Fullname
 $video_size = [math]::Round($video.length / 1GB, 1)
 
-# if ($ffmpeg_mp4 -eq 0) {
-#     $video_new_name = $video.Name
-#     $video_new_path = $video.Fullname
-# }
-# elseif ($ffmpeg_mp4 -eq 1) {
-#     $video_new_name = $video.Name
-#     $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
-#     $video_new_name = "$video_new_name.mp4"
-#     $video_new_path = $video.Fullname
-#     $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
-#     $video_new_path = "$video_new_path.mp4"
-# }
+$video_new_name = $video.Name
+$video_new_path = $video.Fullname
+
+if ($ffmpeg_mp4 -eq 1) {
+    $video_new_name = $video.Name
+    $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
+    $video_new_name = "$video_new_name.mp4"
+    $video_new_path = $video.Fullname
+    $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
+    $video_new_path = "$video_new_path.mp4"
+}
 
 # Write-Host "Check if file is AV1 first..."
 $video_codec = Get-VideoCodec $video_path
@@ -51,13 +50,12 @@ if ($video_codec -ne "av1") {
         
     $transcode_msg = "transcoding to AV1"
 
-
     # AMD TUNING - 
     if ($ffmpeg_codec -eq "av1_amf") { $ffmpeg_codec_tune = "-preset 5 -crf 25" }
     # -vf colorspace=all=bt709 -colorspace 1 -color_primaries 1 -color_trc 1
     
-    # if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
-    # elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
+    if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
+    elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
 
     switch ($ffmpeg_aac) {
         0 { $ffmpeg_aac_cmd = "copy" }
@@ -81,8 +79,12 @@ if ($video_codec -ne "av1") {
  
     # Main FFMPEG Params 
     # $ffmpeg_params = ".\ffmpeg.exe -hide_banner -xerror -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
-    $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
-    #Write-Host $ffmpeg_params
+    # $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
+    # $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
+    #$ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
+    $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a copy -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
+
+    Write-Host $ffmpeg_params
 
     Invoke-Expression $ffmpeg_params -ErrorVariable err 
     if ($err) { 
