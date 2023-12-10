@@ -15,20 +15,20 @@ $video_name = $video.name
 $video_path = $video.Fullname
 $video_size = [math]::Round($video.length / 1GB, 1)
 
-if ($ffmpeg_mp4 -eq 0) {
-    $video_new_name = $video.Name
-    $video_new_path = $video.Fullname
-}
-elseif ($ffmpeg_mp4 -eq 1) {
-    $video_new_name = $video.Name
-    $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
-    $video_new_name = "$video_new_name.mp4"
-    $video_new_path = $video.Fullname
-    $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
-    $video_new_path = "$video_new_path.mp4"
-}
+# if ($ffmpeg_mp4 -eq 0) {
+#     $video_new_name = $video.Name
+#     $video_new_path = $video.Fullname
+# }
+# elseif ($ffmpeg_mp4 -eq 1) {
+#     $video_new_name = $video.Name
+#     $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
+#     $video_new_name = "$video_new_name.mp4"
+#     $video_new_path = $video.Fullname
+#     $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
+#     $video_new_path = "$video_new_path.mp4"
+# }
 
-# Write-Host "Check if file is HEVC first..."
+# Write-Host "Check if file is AV1 first..."
 $video_codec = Get-VideoCodec $video_path
 $audio_codec = Get-AudioCodec $video_path
 $audio_channels = Get-AudioChannels $video_path
@@ -47,38 +47,34 @@ $start_time = (GET-Date)
 Write-Skip "$video_name"
 
 # GPU Offload...
-if ($video_codec -ne "hevc" -AND $video_codec -ne "av1") {
+if ($video_codec -ne "av1") {
         
-    $transcode_msg = "transcoding to HEVC"
+    $transcode_msg = "transcoding to AV1"
 
-    # NVIDIA TUNING 
-    # if ($ffmpeg_codec -eq "hevc_nvenc"){$ffmpeg_codec_tune = "-pix_fmt yuv420p10le -b:v 0 -rc:v vbr"}
+
     # AMD TUNING - 
-    if ($ffmpeg_codec -eq "hevc_amf") { $ffmpeg_codec_tune = "-usage transcoding -quality quality -profile_tier high -header_insertion_mode idr" }
+    if ($ffmpeg_codec -eq "av1_amf") { $ffmpeg_codec_tune = "-preset 5 -crf 25" }
+    # -vf colorspace=all=bt709 -colorspace 1 -color_primaries 1 -color_trc 1
     
-    if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
-    elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
+    # if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
+    # elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
 
-    if ($ffmpeg_aac -eq 0 -OR ($audio_codec -eq "aac" -AND $audio_channels -eq 2)) { $ffmpeg_aac_cmd = "copy" }
-    elseif ($ffmpeg_aac -eq 1) {
-        $ffmpeg_aac_cmd = "aac -ac 2" 
-        $transcode_msg = "$transcode_msg + AAC (2 channel)"
+    switch ($ffmpeg_aac) {
+        0 { $ffmpeg_aac_cmd = "copy" }
+        1 {
+            $ffmpeg_aac_cmd = "aac -ac 2" 
+            $transcode_msg = "$transcode_msg + AAC (2 channel)"
+        }
+        2 {
+            $ffmpeg_aac_cmd = "libfdk_aac -ac 2"
+            $transcode_msg = "$transcode_msg + libfdk AAC (2 channel)"
+        }
     }
-    elseif ($ffmpeg_aac -eq 2) {
-        $ffmpeg_aac_cmd = "libfdk_aac -ac 2"
-        $transcode_msg = "$transcode_msg + libfdk AAC (2 channel)"
-    }
-
-    if ($ffmpeg_eng -eq 0) { $ffmpeg_eng_cmd = "0:a" }
-    elseif ($ffmpeg_eng -eq 1) {
-        $ffmpeg_eng_cmd = "0:m:language:eng?" 
-        $transcode_msg = "$transcode_msg, english only"
-    }
-    
+ 
     if ($convert_1080p -eq 0) { $ffmpeg_scale_cmd = "" } 
     elseif ($convert_1080p -eq 1 -AND $video_width -gt 1920) { $ffmpeg_scale_cmd = "-vf scale=1920:-1" } 
 
-    if ($ffmpeg_mp4 -eq 1) { $transcode_msg = "$transcode_msg MP4" }
+    # if ($ffmpeg_mp4 -eq 1) { $transcode_msg = "$transcode_msg MP4" }
 
     $transcode_msg = "$transcode_msg..."
     Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`) $transcode_msg"      
@@ -134,37 +130,31 @@ if (test-path -PathType leaf "output\$video_new_name") {
     # run checks, if ok then move... 
     if ($diff_percent -eq 100 -OR $video_new_size -eq 0) { 
         Write-Log "$job - $video_new_name ERROR, zero file size ($video_new_size`GB`), File NOT moved" 
-        # Start-sleep 1
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     }
     elseif ($diff_percent -lt $ffmpeg_min_diff ) {
         Write-Log "$job - $video_new_name ERROR, min difference too small ($diff_percent% < $ffmpeg_min_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
-        # Start-sleep 1
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     } 
     elseif ($diff_percent -gt $ffmpeg_max_diff ) {
         Write-Log "$job - $video_new_name ERROR, max too high ($diff_percent% > $ffmpeg_max_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
-        # Start-sleep 1
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     }        
     elseif ($video_new_duration -lt ($video_duration - 5) -OR $video_new_duration -gt ($video_duration + 5)) { 
         Write-Log "$job - $video_new_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved" 
-        # Start-sleep 1
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     }
     elseif ($null -eq $video_new_videocodec) { 
         Write-Log "$job - $video_new_name ERROR, no video stream detected, File NOT moved" 
-        # Start-sleep 1
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     }
     elseif ($null -eq $video_new_audiocodec) { 
         Write-Log "$job - $video_new_name ERROR, no audio stream detected, File NOT moved" 
-        # Start-sleep 1
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     }
@@ -182,7 +172,7 @@ if (test-path -PathType leaf "output\$video_new_name") {
             }                  
             Move-item -Path "output\$video_new_name" -destination "$video_new_path" -Force 
             if ($ffmpeg_mp4 -eq 1) { Remove-Item "$video_path" }
-            Write-SkipHEVC $video_new_name
+            Write-SkipAV1 $video_new_name
         }
         catch {
             Write-Log "Error moving $video_new_name back to source location - Check permissions"   
@@ -193,15 +183,10 @@ if (test-path -PathType leaf "output\$video_new_name") {
 }
 
 Else {   
-    if ($video_codec -eq "hevc") {
-        Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) Already HEVC, Skipping"
-        Write-SkipHEVC $video_name
-        exit
-    }
 
-    elseif ($video_codec -eq "av1") {
+    if ($video_codec -eq "av1") {
         Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) Already AV1, Skipping"
-        Write-SkipHEVC $video_name
+        Write-SkipAV1 $video_name
         exit
     }
     
