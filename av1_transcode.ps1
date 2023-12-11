@@ -26,10 +26,6 @@ $videos = Get-Videos
 # run health check job 
 Invoke-HealthCheck
 
-# run color fix job
-# if ($mkv_color_fix -eq 1){Invoke-ColorFix}
-
-
 # Get previously skipped files from skip.log
 $skipped_files = Get-Skip
 $skippederror_files = Get-SkipError
@@ -127,5 +123,4 @@ while (get-job -State Running -ea silentlycontinue) {
 }   
 Write-Log " exiting"
 Start-Sleep 10
-#Read-Host -Prompt "Press any key to continue"
 exit
