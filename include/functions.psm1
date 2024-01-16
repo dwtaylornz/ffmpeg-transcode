@@ -80,7 +80,7 @@ function Show-State() {
     Write-Host "`nTotal files to skip: $skiptotal_count`n"
     
     $decoding = if ($ffmpeg_hwdec -eq 0) { "CPU" } else { "GPU" }
-    Write-Host "Settings - Encoding: $($ffmpeg_codec) Decoding: $decoding`n"
+    Write-Host "Settings - Encoding: $ffmpeg_video_codec Decoding: $decoding`n"
 
     if ((get-job -State Running -ea silentlycontinue)) {
         Write-Host "Currently Running Jobs - "
@@ -248,10 +248,10 @@ function Write-ColorFixed ([string] $video_name) {
     }
 }
 
-function Write-SkipHEVC ([string] $video_name) {
+function Write-SkipAV1([string] $video_name) {
     if ($video_name) { 
-        $Logfile = "$log_path\skiphevc.txt"
-        $mutexName = 'Write-SkipHEVC'
+        $Logfile = "$log_path\skipav1.txt"
+        $mutexName = 'Write-SkipAV1'
         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
         $check = $mutex.WaitOne() 
         try {

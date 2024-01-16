@@ -79,13 +79,11 @@ if ($video_codec -ne "av1") {
     Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`) $transcode_msg"      
  
     # Main FFMPEG Params 
-    # $ffmpeg_params = ".\ffmpeg.exe -hide_banner -xerror -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
-    # $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
-    # $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
     #$ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
-    $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd $ffmpeg_color_space_cmd -c:v $ffmpeg_video_codec $ffmpeg_video_codec_tune -c:a $ffmpeg_audio_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
+    #$ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd $ffmpeg_color_space_cmd -c:v $ffmpeg_video_codec $ffmpeg_video_codec_tune -c:a $ffmpeg_audio_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
+    $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -c:v $ffmpeg_video_codec $ffmpeg_video_codec_tune -c:a $ffmpeg_audio_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
 
-    Write-Host $ffmpeg_params
+    # Write-Host $ffmpeg_params
 
     Invoke-Expression $ffmpeg_params -ErrorVariable err 
     if ($err) { 
@@ -94,12 +92,15 @@ if ($video_codec -ne "av1") {
         exit
     }
 
-    $end_time = GET-Date
+    $end_time = (GET-Date)
     # calc time taken 
- 
     $time = $end_time - $start_time
-    $total_time_formatted = '{0:HH\:mm\:ss}' -f $time
-    if ($time.Hours -eq 0) { $total_time_formatted = '{0:mm\:ss}' -f $time }
+    $time_hours = $time.hours
+    $time_mins = $time.minutes
+    $time_secs = $time.seconds 
+    if ($time_secs -lt 10) { $time_secs = "0$time_secs" }
+    $total_time_formatted = "$time_hours" + ":" + "$time_mins" + ":" + "$time_secs" 
+    if ($time_hours -eq 0) { $total_time_formatted = "$time_mins" + ":" + "$time_secs" }
 
 }
 
@@ -157,7 +158,9 @@ if (test-path -PathType leaf "output\$video_new_name") {
         Remove-Item "output\$video_new_name"
         Write-SkipError "$video_name"
     }
-    elseif ($move_file -eq 0) { Write-Log "$job - $video_new_name move file disabled, File NOT moved" }
+    elseif ($move_file -eq 0) { 
+        Write-Log "$job - $video_new_name Transcode time: $total_time_formatted, Saved: $diff`GB` ($video_size -> $video_new_size) or $diff_percent%"
+        Write-Log "$job - $video_new_name move file disabled, File NOT moved" }
     # File passes all checks, move....
     else { 
         Write-Log "$job - $video_new_name Transcode time: $total_time_formatted, Saved: $diff`GB` ($video_size -> $video_new_size) or $diff_percent%"
