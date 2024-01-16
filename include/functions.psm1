@@ -164,7 +164,7 @@ function Get-SkipError() {
 
 function Get-SkipAV1() {
     $skippedhevc_files = $null
-    if ((test-path -PathType leaf $log_path\skiphevc.txt)) { 
+    if ((test-path -PathType leaf $log_path\skipav1.txt)) { 
         $mutexName = 'Get-SkipAV1'
         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
         $check = $mutex.WaitOne() 
