@@ -86,25 +86,19 @@ Foreach ($video in $videos) {
                 Get-Job -name GPU-* | Where-Object { $_.State -eq 'Running' -and (($now - $_.PSBeginTime).TotalMinutes -gt $ffmpeg_timeout) } | Stop-Job
 
                 # check for GPU driver issues 
-                $ErrorCheckTime = Get-Date
-                $ErrorCheckTime = $ErrorCheckTime.AddSeconds(-25)
-                $ErrorCheck = $null
+                $ErrorCheckTime = (Get-Date).AddSeconds(-25)
                 $ErrorCheck = get-eventlog System -After $ErrorCheckTime | Where-Object { $_.EventID -eq 4101 }
-                if ($null -ne $ErrorCheck) {      
+                if ($ErrorCheck) {      
                     Write-Host "  DETECTED DRIVER ISSUE." -NoNewline
                     Get-Job -name GPU-* | Stop-Job
                     Write-Host " All Jobs killed. Restarting after delay" -NoNewline
-                    for ($delay = 0; $delay -lt 30 ; $delay++) {
-                        Write-Host "." -NoNewline
-                        Start-Sleep 1
-                    }  
+                    Start-Sleep 30
                     Write-Host "." 
                 }
 
                 # If thread not running then i can run it here 
                 if ($gpu_state -ne "Running") {
-                    if ($ffmpeg_hwdec -eq 1) { $hw = "DE" }
-                    else { $hw = "E" }
+                    $hw = $ffmpeg_hwdec -eq 1 ? "DE" : "E"
                     Start-Job -Name "GPU-$thread" -FilePath .\include\job_transcode.ps1 -ArgumentList $RootDir, $video, "($thread$hw)" | Out-Null 
                     $done = 1 
                     break
