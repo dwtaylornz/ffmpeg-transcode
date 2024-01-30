@@ -19,12 +19,8 @@ $video_new_name = $video.Name
 $video_new_path = $video.Fullname
 
 if ($ffmpeg_mp4 -eq 1) {
-    $video_new_name = $video.Name
-    $video_new_name = $video_new_name.Substring(0, $video_new_name.Length - 4)
-    $video_new_name = "$video_new_name.mp4"
-    $video_new_path = $video.Fullname
-    $video_new_path = $video_new_path.Substring(0, $video_new_path.Length - 4)
-    $video_new_path = "$video_new_path.mp4"
+    $video_new_name = [System.IO.Path]::ChangeExtension($video.Name, ".mp4")
+    $video_new_path = [System.IO.Path]::ChangeExtension($video.Fullname, ".mp4")
 }
 
 # Write-Host "Check if file is AV1 first..."
@@ -111,18 +107,14 @@ if (test-path -PathType leaf "output\$video_new_name") {
     # check size of new file 
     $video_new = Get-ChildItem output\$video_new_name | Select-Object Fullname, extension, length
     $video_new_size = [math]::Round($video_new.length / 1GB, 1)
-    $diff = $video_size - $video_new_size
-    $diff = [math]::Round($diff, 1)
+    $diff = [math]::Round(($video_size - $video_new_size), 1)
     $diff_percent = [math]::Round((1 - ($video_new_size / $video_size)) * 100, 0)
 
     # check video length 
-    $video_new_duration = $null 
     $video_new_duration = Get-VideoDuration output\$video_new_name
 
     # check new media audio and video codec
-    $video_new_videocodec = $null
     $video_new_videocodec = Get-VideoCodec output\$video_new_name
-    $video_new_audiocodec = $null
     $video_new_audiocodec = Get-AudioCodec output\$video_new_name
                  
     if ($video_width -gt 1920) { Write-Log "  New Transcoded Video Width: $video_width -> 1920" }
