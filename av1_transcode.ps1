@@ -54,7 +54,7 @@ Foreach ($video in $videos) {
 
     if ($($video.name) -notin $skiptotal_files) {
 
-        $video_size = [math]::Round($video.length / 1GB, 2)
+        $video_size = [math]::Round($video.length / 1MB, 2)
     
         if ($video_size -lt $min_video_size) { 
             Write-Log "HIT VIDEO SIZE LIMIT - waiting for running jobs to finish then quiting"
