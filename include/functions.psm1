@@ -14,7 +14,6 @@ function Get-VideoCodec ([string] $video_path) {
 }
 
 function Get-AudioCodec ([string] $video_path) {
-    $audio_codec = $null
     $audio_codec = .\ffprobe.exe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`"
     # if (Select-String -pattern "dts" -InputObject $audio_codec -quiet) { $audio_codec = "dts" }
     return $audio_codec
@@ -43,7 +42,6 @@ function Get-VideoWidth ([string] $video_path) {
 }
 
 function Get-VideoDuration ([string] $video_path) {
-    $video_duration = $null 
     $video_duration = (.\ffprobe.exe -loglevel quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`") | Out-String
     $video_duration = $video_duration.trim()
     try { $video_duration = [int]$video_duration }
@@ -51,9 +49,17 @@ function Get-VideoDuration ([string] $video_path) {
     return $video_duration
 }
 
+function Get-VideoDebugInfo (){
+    Write-Host "Debug Info for $video_name"
+    Write-Host "output_path: $output_path"
+    Write-Host "video_new: $video_new"
+    Remove-Item "output\$video_new_name"
+    Write-SkipError "$video_name"
+}
+
+
 function Get-VideoDurationFormatted ([string] $video_duration) {
     # not getting remainding seconds (as sometimes movie is shortened by a couple)
-    $video_duration_formated = $null
     $video_duration_formated = [timespan]::fromseconds($video_duration)
     $video_duration_formated = ("{0:hh\:mm}" -f $video_duration_formated)    
     return $video_duration_formated
@@ -132,7 +138,6 @@ function Get-Videos() {
 }
 
 function Get-Skip() {
-    $skipped_files = $null
     if ((test-path -PathType leaf $log_path\skip.txt)) { 
         $mutexName = 'Get-Skip'
         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
@@ -147,7 +152,6 @@ function Get-Skip() {
     return $skipped_files
 }
 function Get-SkipError() {
-    $skippederror_files = $null
     if ((test-path -PathType leaf $log_path\skiperror.txt)) { 
         $mutexName = 'Get-SkipError'
         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
@@ -163,7 +167,6 @@ function Get-SkipError() {
 }
 
 function Get-SkipAV1() {
-    $skippedhevc_files = $null
     if ((test-path -PathType leaf $log_path\skipav1.txt)) { 
         $mutexName = 'Get-SkipAV1'
         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
