@@ -59,7 +59,7 @@ if ($video_codec -ne $video_codec_skip_list) {
     # else if ffmpeg_acc equals 1 then transcode audio to aac and set audio channels to 2
     if (($ffmpeg_acc -eq 0) -or ($audio_channels -eq 2 -and $audio_codec -eq 'aac')) {
         $ffmpeg_audio_cmd = "copy"
-        $transcode_msg = "$transcode_msg + Audio (copy)"    
+        $transcode_msg = "$transcode_msg + AAC (copy)"    
     }
     elseif ($ffmpeg_aac -eq 1) { 
         $ffmpeg_audio_cmd = "aac -ac 2" 
