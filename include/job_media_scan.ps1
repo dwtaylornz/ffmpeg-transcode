@@ -7,7 +7,7 @@ if ($RootDir -eq ""){ $RootDir = $pwd }
 . (Join-Path $RootDir variables.ps1)
 
 # Get all video files and sizes (sorting largest to smallest)
-$videoExtensions = "*.mkv", "*.avi", "*.ts", "*.mov", "*.y4m", "*.m2ts", "*.mp4"
+$videoExtensions = "*.mkv", "*.avi", "*.ts", "*.mov", "*.y4m", "*.m2ts", "*.mp4", "*.wmv"
 $videos = Get-ChildItem -r $media_path -Include $videoExtensions | 
           Sort-Object -Descending -Property Length | 
           Select-Object Fullname, Name, Length

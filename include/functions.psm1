@@ -41,6 +41,22 @@ function Get-VideoWidth ([string] $video_path) {
     return $video_width
 }
 
+function Get-VideoHeight ([string] $video_path) {
+    $video_height = (.\ffprobe.exe -loglevel quiet -show_entries stream=height -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String
+    if ($video_height -eq "N/A") { 
+        $video_height = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String 
+    }   
+    $video_height = $video_height.trim().Split("")[0]
+    if ($video_height -eq "1080") { $video_height = "1080" }   
+    try {  
+        $video_height = [Int]$video_height 
+    }
+    catch { 
+        Write-Host "  $video_path height issue"
+    }
+    return $video_height
+}
+
 function Get-VideoDuration ([string] $video_path) {
     $video_duration = (.\ffprobe.exe -loglevel quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`") | Out-String
     $video_duration = $video_duration.trim()
@@ -51,12 +67,14 @@ function Get-VideoDuration ([string] $video_path) {
 
 function Get-VideoDebugInfo (){
     Write-Host "Debug Info for $video_name"
-    Write-Host "output_path: $output_path"
-    Write-Host "video_new: $video_new"
-    Remove-Item "output\$video_new_name"
+    Write-Host "  output_path: $output_path"
+    Write-Host "  video_new: $video_new"
+    # if video_new_name not null then 
+    if ($video_new_name) { 
+        Remove-Item "output\$video_new_name" -force -ea silentlycontinue 
+    }
     Write-SkipError "$video_name"
 }
-
 
 function Get-VideoDurationFormatted ([string] $video_duration) {
     # not getting remainding seconds (as sometimes movie is shortened by a couple)
@@ -79,10 +97,10 @@ function Start-Delay {
 }
 
 function Show-State() {
-    $skiptotal_count = $skipped_files.Count + $skippederror_files.Count + $skippedav1_files.Count
+    $skiptotal_count = $skipped_files.Count + $skippederror_files.Count # + $skippedav1_files.Count
     Write-Host "Previously processed files: $($skipped_files.Count)" 
     Write-Host "Previously errored files: $($skippederror_files.Count)" 
-    Write-Host "Existing AV1 files: $($skippedav1_files.Count)" 
+    # Write-Host "Existing AV1 files: $($skippedav1_files.Count)" 
     Write-Host "`nTotal files to skip: $skiptotal_count`n"
     
     $decoding = if ($ffmpeg_hwdec -eq 0) { "CPU" } else { "GPU" }
@@ -166,20 +184,20 @@ function Get-SkipError() {
     return $skippederror_files
 }
 
-function Get-SkipAV1() {
-    if ((test-path -PathType leaf $log_path\skipav1.txt)) { 
-        $mutexName = 'Get-SkipAV1'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            $skippedhevc_files = @(Get-Content -Path $log_path\skipAV1.txt -Encoding utf8 -ErrorAction Stop)     
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }        
-    }
-    return  $skippedhevc_files
-}
+# function Get-SkipAV1() {
+#     if ((test-path -PathType leaf $log_path\skipav1.txt)) { 
+#         $mutexName = 'Get-SkipAV1'
+#         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
+#         $check = $mutex.WaitOne() 
+#         try {
+#             $skippedhevc_files = @(Get-Content -Path $log_path\skipAV1.txt -Encoding utf8 -ErrorAction Stop)     
+#         }
+#         finally {
+#             $mutex.ReleaseMutex()
+#         }        
+#     }
+#     return  $skippedhevc_files
+# }
 
 function Write-Log  ([string] $LogString) {
     if ($LogString) {
@@ -251,20 +269,20 @@ function Write-ColorFixed ([string] $video_name) {
     }
 }
 
-function Write-SkipAV1([string] $video_name) {
-    if ($video_name) { 
-        $Logfile = "$log_path\skipav1.txt"
-        $mutexName = 'Write-SkipAV1'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-            return 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }
-    }
-}
+# function Write-SkipAV1([string] $video_name) {
+#     if ($video_name) { 
+#         $Logfile = "$log_path\skipav1.txt"
+#         $mutexName = 'Write-SkipAV1'
+#         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
+#         $check = $mutex.WaitOne() 
+#         try {
+#             Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
+#             return 
+#         }
+#         finally {
+#             $mutex.ReleaseMutex()
+#         }
+#     }
+# }
 
 Export-ModuleMember -Function *

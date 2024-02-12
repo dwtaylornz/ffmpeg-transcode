@@ -24,15 +24,16 @@ $video_new_path = $video.Fullname
 # }
 
 # Write-Host "Check if file is AV1 first..."
-$video_codec = Get-VideoCodec $video_path
-$audio_codec = Get-AudioCodec $video_path
-$audio_channels = Get-AudioChannels $video_path
+$video_codec = Get-VideoCodec "$video_path"
+$audio_codec = Get-AudioCodec "$video_path"
+$audio_channels = Get-AudioChannels "$video_path"
 
 # check video width (1920 width is more consistant for 1080p videos)
-$video_width = Get-VideoWidth $video_path
+$video_width = Get-VideoWidth "$video_path"
+# $video_height = Get-VideoHeight "$video_path"
 
 # check video duration 
-$video_duration = Get-VideoDuration $video_path
+$video_duration = Get-VideoDuration "$video_path"
 # $video_duration_formated = Get-VideoDurationFormatted $video_duration 
 
 $start_time = (GET-Date)
@@ -42,7 +43,7 @@ $start_time = (GET-Date)
 Write-Skip "$video_name"
 
 # GPU Offload...
-if ($video_codec -ne "av1") {
+if ($video_codec -ne $video_codec_skip_list) {
         
     $transcode_msg = "transcoding to AV1"
 
@@ -54,16 +55,15 @@ if ($video_codec -ne "av1") {
 
     # $ffmpeg_color_space_cmd = "-vf colorspace=all=bt709 -colorspace 1 -color_primaries 1 -color_trc 1"
 
-    switch ($ffmpeg_aac) {
-        0 { $ffmpeg_audio_cmd = "copy" }
-        1 {
-            $ffmpeg_audio_cmd = "aac -ac 2" 
-            $transcode_msg = "$transcode_msg + AAC (2 channel)"
-        }
-        2 {
-            $ffmpeg_audio_cmd = "libfdk_aac -ac 2"
-            $transcode_msg = "$transcode_msg + libfdk AAC (2 channel)"
-        }
+    # if ffmpeg_acc equals 0 or audio_channels equals 2 and audio_codec equals aac then copy audio  
+    # else if ffmpeg_acc equals 1 then transcode audio to aac and set audio channels to 2
+    if (($ffmpeg_acc -eq 0) -or ($audio_channels -eq 2 -and $audio_codec -eq 'aac')) {
+        $ffmpeg_audio_cmd = "copy"
+        $transcode_msg = "$transcode_msg + Audio (copy)"    
+    }
+    elseif ($ffmpeg_aac -eq 1) { 
+        $ffmpeg_audio_cmd = "aac -ac 2" 
+        $transcode_msg = "$transcode_msg + AAC (2 channel)"    
     }
  
     if ($convert_1080p -eq 0) { $ffmpeg_scale_cmd = "" } 
@@ -77,8 +77,6 @@ if ($video_codec -ne "av1") {
     $output_path = "output\$video_new_name"
  
     # Main FFMPEG Params 
-    #$ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -map $ffmpeg_eng_cmd -map 0:v -c:v $ffmpeg_codec $ffmpeg_codec_tune -c:a $ffmpeg_aac_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
-    #$ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd $ffmpeg_color_space_cmd -c:v $ffmpeg_video_codec $ffmpeg_video_codec_tune -c:a $ffmpeg_audio_cmd -c:s copy -max_muxing_queue_size 9999 `"output\$video_new_name`" "
     $ffmpeg_params = ".\ffmpeg.exe -hide_banner -err_detect ignore_err -ec guess_mvs+deblock+favor_inter -ignore_unknown -v $ffmpeg_logging -y $ffmpeg_dec_cmd -i `"$video_path`" $ffmpeg_scale_cmd -c:v $ffmpeg_video_codec $ffmpeg_video_codec_tune -c:a $ffmpeg_audio_cmd -c:s copy -max_muxing_queue_size 9999 `"$output_path`" "
 
     # Write-Host $ffmpeg_params
@@ -102,8 +100,8 @@ if ($video_codec -ne "av1") {
 
 }
 else {
-    Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) Already AV1, Skipping"
-    Write-SkipAV1 $video_name
+    Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) in video codec skip list, skipping"
+    Write-Skip $video_name
     exit
 }
 
@@ -134,18 +132,10 @@ try {
     if ($convert_1080p -eq 1 -AND $video_width -gt 1920) { Write-Log "$job - $video_new_name New Transcoded Video Width: $video_width -> 1920" }
               
     # run checks, if ok then move... 
-    if ($diff_percent -eq 100 -OR $video_new_size -eq 0) { 
+    if ($video_new_size -eq 0) { 
         Write-Log "$job - $video_new_name ERROR, zero file size ($video_new_size`GB`), File NOT moved" 
         Get-VideoDebugInfo
     }
-    elseif ($diff_percent -lt $ffmpeg_min_diff ) {
-        Write-Log "$job - $video_new_name ERROR, min difference too small ($diff_percent% < $ffmpeg_min_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
-        Get-VideoDebugInfo
-    } 
-    elseif ($diff_percent -gt $ffmpeg_max_diff ) {
-        Write-Log "$job - $video_new_name ERROR, max too high ($diff_percent% > $ffmpeg_max_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
-        Get-VideoDebugInfo
-    }        
     elseif ($video_new_duration -lt ($video_duration - 5) -OR $video_new_duration -gt ($video_duration + 5)) { 
         Write-Log "$job - $video_new_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved" 
         Get-VideoDebugInfo
@@ -158,6 +148,15 @@ try {
         Write-Log "$job - $video_new_name ERROR, no audio stream detected, File NOT moved" 
         Get-VideoDebugInfo
     }
+    elseif ($diff_percent -lt $ffmpeg_min_diff ) {
+        Write-Log "$job - $video_new_name ERROR, min difference too small ($diff_percent% < $ffmpeg_min_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
+        Get-VideoDebugInfo
+    } 
+    elseif ($diff_percent -gt $ffmpeg_max_diff ) {
+        Write-Log "$job - $video_new_name ERROR, max too high ($diff_percent% > $ffmpeg_max_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
+        Get-VideoDebugInfo
+    }        
+   
     elseif ($move_file -eq 0) { 
         Write-Log "$job - $video_new_name Transcode time: $total_time_formatted, Saved: $diff`GB` ($video_size -> $video_new_size) or $diff_percent%"
         Write-Log "$job - $video_new_name move file disabled, File NOT moved" 
@@ -168,9 +167,9 @@ try {
         Write-Host "  $video_new_name (duration $video_duration -> $video_new_duration, video codec $video_codec -> $video_new_videocodec, audio codec $audio_codec -> $video_new_audiocodec)"
         try {
             Start-delay
-            Write-Log "$job - $video_new_name Moving file to source location ($output_path -> $video_path)"
+            # Write-Log "$job - $video_new_name Moving file to source location ($output_path -> $video_path)"
             Move-item -Path "$output_path" -destination "$video_path" -Force 
-            Write-SkipAV1 $video_new_name
+            Write-Skip $video_new_name
             Start-Sleep 2
             if (Test-Path "$output_path") { 
                 Remove-Item "$output_path" -Force

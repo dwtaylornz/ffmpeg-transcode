@@ -29,13 +29,12 @@ Invoke-HealthCheck
 # Get previously skipped files from skip.log
 $skipped_files = Get-Skip
 $skippederror_files = Get-SkipError
-$skippedav1_files = Get-SkipAV1
 
 #Show settings and any jobs running 
 Show-State
 
 # if single machine here - 
-$skiptotal_files = $skipped_files + $skippederror_files + $skippedav1_files
+$skiptotal_files = $skipped_files + $skippederror_files 
 
 #Main Loop across videos 
 $queue_timer = Get-Date
@@ -47,8 +46,7 @@ Foreach ($video in $videos) {
         $videos = Get-Videos
         $skipped_files = Get-Skip
         $skippederror_files = Get-SkipError
-        $skippedav1_files = Get-SkipAV1
-        $skiptotal_files = $skipped_files + $skippederror_files + $skippedav1_files
+        $skiptotal_files = $skipped_files + $skippederror_files 
         $queue_timer = Get-Date
     }
 
