@@ -42,7 +42,7 @@ Foreach ($video in $videos) {
 
     # if duration has exceeded queue timer then re run the scan 
     $duration = $(Get-Date) - $queue_timer
-    if ($duration.TotalMinutes -gt $restart_queue) {
+    if ($duration.TotalMinutes -gt $restart_queue -AND $restart_queue -ne 0) {
         $videos = Get-Videos
         $skipped_files = Get-Skip
         $skippederror_files = Get-SkipError

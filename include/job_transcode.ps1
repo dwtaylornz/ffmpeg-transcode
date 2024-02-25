@@ -49,6 +49,8 @@ if ($video_codec -ne $video_codec_skip_list) {
 
     # AMD TUNING - 
     if ($ffmpeg_video_codec -eq "av1_amf") { $ffmpeg_video_codec_tune = "-quality 30 -preset 5 -crf 22" }
+    elseif ($ffmpeg_video_codec -eq "libsvtav1") {$ffmpeg_video_codec_tune = "-crf 20 -preset 6 -g 240 -svtav1-params tune=0:enable-overlays=1:scd=1:scm=2 -pix_fmt yuv420p10le" }
+
     
     if ($ffmpeg_hwdec -eq 0) { $ffmpeg_dec_cmd = "" }
     elseif ($ffmpeg_hwdec -eq 1) { $ffmpeg_dec_cmd = "-hwaccel cuda -hwaccel_output_format cuda" }
