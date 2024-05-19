@@ -134,12 +134,14 @@ function Invoke-ColorFix() {
 function Get-Videos() {
     get-job -Name Scan -ea silentlycontinue | Stop-Job -ea silentlycontinue | Out-Null  
 
-    if (-not(test-path -PathType leaf $log_path\scan_results.csv) -or $scan_at_start -eq 1) { 
-        Write-Host  -NoNewline "Running file scan... " 
+    $fileContent = Get-Content -Path "$log_path\scan_results.csv" -Raw -ErrorAction SilentlyContinue
+
+    if (-not(Test-Path -PathType Leaf "$log_path\scan_results.csv") -or $scan_at_start -eq 1 -or [string]::IsNullOrEmpty($fileContent)) { 
+        Write-Host -NoNewline "Running file scan... " 
         Start-Job -Name "Scan" -FilePath .\include\job_media_scan.ps1 -ArgumentList $RootDir | Out-Null
         Receive-Job -name "Scan" -wait -Force
         Start-Sleep 2 
-    }  
+    }
 
     $videos = @(Import-Csv -Path $log_path\scan_results.csv -Encoding utf8)
     Write-Host " files: " $videos.Count
@@ -183,22 +185,6 @@ function Get-SkipError() {
     }
     return $skippederror_files
 }
-
-# function Get-SkipAV1() {
-#     if ((test-path -PathType leaf $log_path\skipav1.txt)) { 
-#         $mutexName = 'Get-SkipAV1'
-#         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-#         $check = $mutex.WaitOne() 
-#         try {
-#             $skippedhevc_files = @(Get-Content -Path $log_path\skipAV1.txt -Encoding utf8 -ErrorAction Stop)     
-#         }
-#         finally {
-#             $mutex.ReleaseMutex()
-#         }        
-#     }
-#     return  $skippedhevc_files
-# }
-
 function Write-Log  ([string] $LogString) {
     if ($LogString) {
         $Logfile = "$log_path\transcode.log"
@@ -268,21 +254,5 @@ function Write-ColorFixed ([string] $video_name) {
         }
     }
 }
-
-# function Write-SkipAV1([string] $video_name) {
-#     if ($video_name) { 
-#         $Logfile = "$log_path\skipav1.txt"
-#         $mutexName = 'Write-SkipAV1'
-#         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-#         $check = $mutex.WaitOne() 
-#         try {
-#             Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-#             return 
-#         }
-#         finally {
-#             $mutex.ReleaseMutex()
-#         }
-#     }
-# }
 
 Export-ModuleMember -Function *
