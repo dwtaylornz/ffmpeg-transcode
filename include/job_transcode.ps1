@@ -16,7 +16,7 @@ $video_path = $video.Fullname
 $video_size = [math]::Round($video.length / 1GB, 1)
 
 $video_new_name = $video.Name
-$video_new_path = $video.Fullname
+# $video_new_path = $video.Fullname
 
 # if ($ffmpeg_mp4 -eq 1) {
 #     $video_new_name = [System.IO.Path]::ChangeExtension($video.Name, ".mp4")
@@ -25,25 +25,23 @@ $video_new_path = $video.Fullname
 
 # Write-Host "Check if file is AV1 first..."
 $video_codec = Get-VideoCodec "$video_path"
-$audio_codec = Get-AudioCodec "$video_path"
-$audio_channels = Get-AudioChannels "$video_path"
 
-# check video width (1920 width is more consistant for 1080p videos)
-$video_width = Get-VideoWidth "$video_path"
-# $video_height = Get-VideoHeight "$video_path"
-
-# check video duration 
-$video_duration = Get-VideoDuration "$video_path"
-# $video_duration_formated = Get-VideoDurationFormatted $video_duration 
-
-$start_time = (GET-Date)
-
-# Add to skip file so it is not processed again
-# do at beginning so that stuff that times out does not get processed again. 
-Write-Skip "$video_name"
 
 # GPU Offload...
 if ($video_codec -ne $video_codec_skip_list) {
+
+    # check audio codec and channels, video width and duration
+
+    $audio_codec = Get-AudioCodec "$video_path"
+    $audio_channels = Get-AudioChannels "$video_path"
+    $video_width = Get-VideoWidth "$video_path"
+    $video_duration = Get-VideoDuration "$video_path"
+
+    $start_time = (GET-Date)
+
+    # Add to skip file so it is not processed again
+    # do at beginning so that stuff that times out does not get processed again. 
+    Write-Skip "$video_name"
         
     $transcode_msg = "transcoding to AV1"
 
