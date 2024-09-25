@@ -69,7 +69,6 @@ function Get-VideoDebugInfo (){
     Write-Host "Debug Info for $video_name"
     Write-Host "  output_path: $output_path"
     Write-Host "  video_new: $video_new"
-    # if video_new_name not null then 
     if ($video_new_name) { 
         Remove-Item "output\$video_new_name" -force -ea silentlycontinue 
     }
