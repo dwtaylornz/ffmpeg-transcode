@@ -34,7 +34,7 @@ if ($video_codec -ne $video_codec_skip_list) {
     # Add to skip file so it is not processed again
     Write-Skip "$video_name"
         
-    $transcode_msg = "transcoding to AV1"
+    $transcode_msg = "transcoding using ($ffmpeg_parametres)"
 
     $transcode_msg = "$transcode_msg..."
     Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`) $transcode_msg"    
@@ -83,6 +83,11 @@ try {
     $diff = [math]::Round(($video_size - $video_new_size), 1)
     $diff_percent = [math]::Round((1 - ($video_new_size / $video_size)) * 100, 0)
 
+    # calculate how many minutes per gb of orignal size 
+    $gb_per_minute = [math]::Round(($video_size / ($time.TotalSeconds / 60)), 2)
+    
+
+
     #debug
     # Write-Host "video_new: $video_new"
     # Write-Host "video_new.length: $video_new.length"
@@ -125,7 +130,7 @@ try {
     }
     # File passes all checks, move....
     else { 
-        Write-Log "$job - $video_new_name Transcode time: $total_time_formatted, Saved: $diff`GB` ($video_size -> $video_new_size) or $diff_percent%"
+        Write-Log "$job - $video_new_name Transcode time: $total_time_formatted ($gb_per_minute GB/m), Saved: $diff`GB` ($video_size -> $video_new_size) or $diff_percent%"
         Write-Host "  $video_new_name (duration $video_duration -> $video_new_duration, video codec $video_codec -> $video_new_videocodec, audio codec $audio_codec -> $video_new_audiocodec)"
         try {
             Start-delay
