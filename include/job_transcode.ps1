@@ -86,8 +86,6 @@ try {
     # calculate how many minutes per gb of orignal size 
     $gb_per_minute = [math]::Round(($video_size / ($time.TotalSeconds / 60)), 2)
     
-
-
     #debug
     # Write-Host "video_new: $video_new"
     # Write-Host "video_new.length: $video_new.length"

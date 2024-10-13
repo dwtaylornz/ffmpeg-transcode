@@ -108,11 +108,13 @@ Foreach ($video in $videos) {
         }
     }
 }
+
 Write-Log " Queue complete, waiting for running jobs to finish then quiting"
 while (get-job -State Running -ea silentlycontinue) {
     Start-Sleep 1
     Receive-Job *
 }   
+
 Write-Log " exiting"
 Start-Sleep 10
 exit
