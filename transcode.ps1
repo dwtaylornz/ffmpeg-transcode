@@ -18,7 +18,7 @@ Write-Log " Starting..."
 Write-Host ""
 
 # Setup temp output folder, and clear previous transcodes
-Initialize-Folders
+Initialize-Output-Folder
 
 # Get Videos - run Scan job at $media_path or retrive videos from .\scan_results
 $videos = Get-Videos
