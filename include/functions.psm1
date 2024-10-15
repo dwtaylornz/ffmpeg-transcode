@@ -9,13 +9,11 @@ function Get-VideoCodec ([string] $video_path) {
             break
         }
     }
-
     return $video_codec
 }
 
 function Get-AudioCodec ([string] $video_path) {
     $audio_codec = .\ffprobe.exe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`"
-    # if (Select-String -pattern "dts" -InputObject $audio_codec -quiet) { $audio_codec = "dts" }
     return $audio_codec
 }
 
@@ -76,7 +74,7 @@ function Get-VideoDebugInfo (){
 }
 
 function Get-VideoDurationFormatted ([string] $video_duration) {
-    # not getting remainding seconds (as sometimes movie is shortened by a couple)
+    # not getting remaining seconds (as sometimes movie is shortened by a couple)
     $video_duration_formated = [timespan]::fromseconds($video_duration)
     $video_duration_formated = ("{0:hh\:mm}" -f $video_duration_formated)    
     return $video_duration_formated
@@ -96,10 +94,9 @@ function Start-Delay {
 }
 
 function Show-State() {
-    $skiptotal_count = $skipped_files.Count + $skippederror_files.Count # + $skippedav1_files.Count
+    $skiptotal_count = $skipped_files.Count + $skippederror_files.Count 
     Write-Host "Previously processed files: $($skipped_files.Count)" 
     Write-Host "Previously errored files: $($skippederror_files.Count)" 
-    # Write-Host "Existing AV1 files: $($skippedav1_files.Count)" 
     Write-Host "`nTotal files to skip: $skiptotal_count`n"
     
     $decoding = if ($ffmpeg_hwdec -eq 0) { "CPU" } else { "GPU" }
@@ -113,7 +110,6 @@ function Show-State() {
 }
 
 function Initialize-OutputFolder {
-    # Setup required folders
     $outputPath = "output"
 
     if (-not (Test-Path -Path $outputPath -PathType Container)) {
@@ -137,7 +133,7 @@ function Invoke-ColorFix() {
     }
 }
 
-# File stuff 
+
 function Get-Videos() {
     get-job -Name Scan -ea silentlycontinue | Stop-Job -ea silentlycontinue | Out-Null  
 

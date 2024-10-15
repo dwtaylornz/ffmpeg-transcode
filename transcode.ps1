@@ -55,7 +55,7 @@ Foreach ($video in $videos) {
         $video_size = [math]::Round($video.length / 1MB, 2)
     
         if ($video_size -lt $min_video_size) { 
-            Write-Log "HIT VIDEO SIZE LIMIT - waiting for running jobs to finish then quiting"
+            Write-Log " HIT VIDEO SIZE LIMIT - waiting for running jobs to finish then quiting"
             while (get-job -State Running -ea silentlycontinue) {
                 Start-Sleep 1
                 Receive-Job *
@@ -82,17 +82,6 @@ Foreach ($video in $videos) {
                 # has thread run too long? 
                 $now = Get-Date
                 Get-Job -name GPU-* | Where-Object { $_.State -eq 'Running' -and (($now - $_.PSBeginTime).TotalMinutes -gt $ffmpeg_timeout) } | Stop-Job
-
-                # check for GPU driver issues 
-                $ErrorCheckTime = (Get-Date).AddSeconds(-25)
-                $ErrorCheck = get-eventlog System -After $ErrorCheckTime | Where-Object { $_.EventID -eq 4101 }
-                if ($ErrorCheck) {      
-                    Write-Host "  DETECTED DRIVER ISSUE." -NoNewline
-                    Get-Job -name GPU-* | Stop-Job
-                    Write-Host " All Jobs killed. Restarting after delay" -NoNewline
-                    Start-Sleep 30
-                    Write-Host "." 
-                }
 
                 # If thread not running then i can run it here 
                 if ($gpu_state -ne "Running") {
