@@ -1,4 +1,4 @@
-## Reduce your media disk consumption with ffmpeg!
+## reduce your media disk consumption with ffmpeg!
 A windows powershell script to re-encode media library videos using ffmpeg on windows. 
 
 ### requirements
@@ -10,7 +10,7 @@ A windows powershell script to re-encode media library videos using ffmpeg on wi
 - run `transcode.ps1` in powershell 
 
 ### warning! 
-**Script will overwrite existing source files if conversion is successfull**
+**script will overwrite existing source files if conversion is successfull**
 
 ### functions
 - traverses media path (scans all video files in subfolders) - as a job in background 
@@ -20,5 +20,5 @@ A windows powershell script to re-encode media library videos using ffmpeg on wi
 - writes **transcode.log** for logging 
 
 ### limitations (potential todo list) 
-Deminishing effort vs reward - 
+deminishing effort vs reward - 
 - does not have a progress status during transcode 
