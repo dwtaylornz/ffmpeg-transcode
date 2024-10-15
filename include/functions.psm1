@@ -111,10 +111,18 @@ function Show-State() {
         Write-Host ""
     }
 }
-function Initialize-Folders() {
+
+function Initialize-Output-Folder {
     # Setup required folders
-    if (!(test-path -PathType container output)) { new-item -itemtype directory -force -path output | Out-Null }
+    $outputPath = "output"
+
+    if (-not (Test-Path -Path $outputPath -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
+    } else {
+        Get-ChildItem -Path $outputPath -Recurse | Remove-Item -Force -Recurse
+    }
 }
+
 function Invoke-HealthCheck() {
     if ($run_health_check -eq 1) { 
         Write-Host "Running health scan..." 

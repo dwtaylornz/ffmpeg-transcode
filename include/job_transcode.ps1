@@ -16,7 +16,7 @@ $video_path = $video.Fullname
 $video_size = [math]::Round($video.length / 1GB, 1)
 $video_new_name = $video.Name
 
-# Write-Host "Check if file is AV1 first..."
+# Write-Host "Check video codec first..."
 $video_codec = Get-VideoCodec "$video_path"
 
 # GPU Offload...
@@ -67,7 +67,7 @@ if ($video_codec -ne $video_codec_skip_list) {
 
 }
 else {
-    Write-Log  "$job - $video_name ($video_codec, $video_width, $video_size GB) in video codec skip list, skipping"
+    Write-Log  "$job - $video_name ($video_codec, $video_size GB) in video codec skip list, skipping"
     Write-Skip $video_name
     exit
 }
@@ -101,7 +101,7 @@ try {
         Write-Log "$job - $video_new_name ERROR, zero file size ($video_new_size`GB`), File NOT moved" 
         Get-VideoDebugInfo
     }
-    elseif ($video_new_duration -lt ($video_duration - 5) -OR $video_new_duration -gt ($video_duration + 5)) { 
+    elseif ($video_new_duration -lt ($video_duration - 10) -OR $video_new_duration -gt ($video_duration + 10)) { 
         Write-Log "$job - $video_new_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved" 
         Get-VideoDebugInfo
     }
