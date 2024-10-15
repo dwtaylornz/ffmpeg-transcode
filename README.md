@@ -3,11 +3,11 @@ A windows powershell script to re-encode media library videos using ffmpeg on wi
 
 ### requirements
 - ffmpeg executables for windows (includes gpu offload) - https://ffmpeg.org/download.html
-- run `get-ffmpeg.ps1`
+    - run `get-ffmpeg.ps1` to get latest version of ffmpeg in current directory
 
 ### usage 
-- Update `variables.ps1` with your settings
-- Run `transcode.ps1` in powershell 
+- update `variables.ps1` with your settings
+- run `transcode.ps1` in powershell 
 
 ### warning! 
 **Script will overwrite existing source files if conversion is successfull**
