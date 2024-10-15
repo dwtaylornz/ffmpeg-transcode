@@ -112,7 +112,7 @@ function Show-State() {
     }
 }
 
-function Initialize-Output-Folder {
+function Initialize-OutputFolder {
     # Setup required folders
     $outputPath = "output"
 
