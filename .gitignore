@@ -5,3 +5,4 @@
 output
 .vscode/launch.json
 variables*.ps1
+variables.ps1
