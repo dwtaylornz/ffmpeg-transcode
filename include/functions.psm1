@@ -192,7 +192,7 @@ function Write-Log  ([string] $LogString) {
     if ($LogString) {
         $Logfile = "$log_path\transcode.log"
         $Stamp = (Get-Date).toString("yy/MM/dd HH:mm:ss")
-        $LogMessage = "$Stamp $env:computername$LogString"
+        $LogMessage = "$Stamp $env:computername $LogString"
         if ($LogString -like '*transcoding*') { Write-Host "$LogMessage" -ForegroundColor Cyan }
         elseif ($LogString -like '*ERROR*') { Write-Host "$LogMessage" -ForegroundColor Red }
         elseif ($LogString -like '*Saved:*') { Write-Host "$LogMessage" -ForegroundColor Green }
