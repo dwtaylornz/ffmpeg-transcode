@@ -20,7 +20,7 @@ Write-Host ""
 # Setup temp output folder, and clear previous transcodes
 Initialize-OutputFolder
 
-# Get Videos - run Scan job at $media_path or retrive videos from .\scan_results
+# Get Videos - run Scan job at $media_path or retrive videos from .\scan_results.csv
 $videos = Get-Videos
 
 # run health check job 
