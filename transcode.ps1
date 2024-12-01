@@ -92,6 +92,7 @@ Foreach ($video in $videos) {
                 }       
                 
                 Receive-Job -name *
+                Set-FFmpegLowPriority
             }          
             if ($done -eq 1) { break }
         }
