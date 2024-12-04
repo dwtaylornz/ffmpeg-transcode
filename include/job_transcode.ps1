@@ -52,6 +52,7 @@ if ($video_codec -ne $video_codec_skip_list) {
         Write-SkipError "$video_name" 
         exit
     }
+    Set-FFmpegLowPriority
 
     $end_time = (Get-Date)
     # Calculate time taken

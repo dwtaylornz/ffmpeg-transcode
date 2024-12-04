@@ -11,18 +11,15 @@ function Get-VideoCodec ([string] $video_path) {
     }
     return $video_codec
 }
-
 function Get-AudioCodec ([string] $video_path) {
     $audio_codec = .\ffprobe.exe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`"
     return $audio_codec
 }
-
 function Get-AudioChannels ([string] $video_path) {
     $audio_channels = $null
     $audio_channels = .\ffprobe.exe -v quiet -select_streams a:0 -show_entries stream=channels -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`"
     return $audio_channels
 }
-
 function Get-VideoWidth ([string] $video_path) {
     $video_width = (.\ffprobe.exe -loglevel quiet -show_entries stream=width -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String
     if ($video_width -eq "N/A") { 
@@ -38,7 +35,6 @@ function Get-VideoWidth ([string] $video_path) {
     }
     return $video_width
 }
-
 function Get-VideoHeight ([string] $video_path) {
     $video_height = (.\ffprobe.exe -loglevel quiet -show_entries stream=height -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String
     if ($video_height -eq "N/A") { 
@@ -54,16 +50,14 @@ function Get-VideoHeight ([string] $video_path) {
     }
     return $video_height
 }
-
 function Get-VideoDuration ([string] $video_path) {
     $video_duration = (.\ffprobe.exe -loglevel quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`") | Out-String
     $video_duration = $video_duration.trim()
     try { $video_duration = [int]$video_duration }
-    catch { write-host "  "$video.name" duation issue"}
+    catch { write-host "  "$video.name" duation issue" }
     return $video_duration
 }
-
-function Get-VideoDebugInfo (){
+function Get-VideoDebugInfo () {
     Write-Host "Debug Info for $video_name"
     Write-Host "  output_path: $output_path"
     Write-Host "  video_new: $video_new"
@@ -72,27 +66,23 @@ function Get-VideoDebugInfo (){
     }
     Write-SkipError "$video_name"
 }
-
 function Get-VideoDurationFormatted ([string] $video_duration) {
     # not getting remaining seconds (as sometimes movie is shortened by a couple)
     $video_duration_formated = [timespan]::fromseconds($video_duration)
     $video_duration_formated = ("{0:hh\:mm}" -f $video_duration_formated)    
     return $video_duration_formated
 }
-
 function Get-JobStatus ([string] $job) {
     if ( [bool](get-job -Name $job -ea silentlycontinue) ) {
         $state = (get-job -Name $job).State 
         return $state
     }
 }
-
 function Start-Delay {
     Write-Host -NoNewline "  Waiting 5 seconds before file move "
     Write-Host "(do not break or close window)" -ForegroundColor Yellow     
     Start-Sleep 5
 }
-
 function Show-State() {
     $skiptotal_count = $skipped_files.Count + $skippederror_files.Count 
     Write-Host "Previously processed files: $($skipped_files.Count)" 
@@ -108,45 +98,43 @@ function Show-State() {
         Write-Host ""
     }
 }
-
 function Initialize-OutputFolder {
     $outputPath = "output"
 
     if (-not (Test-Path -Path $outputPath -PathType Container)) {
         New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
-    } else {
+    }
+    else {
         Get-ChildItem -Path $outputPath -Recurse | Remove-Item -Force -Recurse
     }
 }
-
 function Invoke-HealthCheck() {
     if ($run_health_check -eq 1) { 
         Write-Host "Running health scan..." 
         Start-Job -Name "HealthCheck" -FilePath .\include\job_health_check.ps1 -ArgumentList $RootDir, $videos | Out-Null
     }
 }
-
 function Invoke-ColorFix() {
     if ($mkv_color_fix -eq 1) { 
         Write-Host "Fixing color on mkv files..." 
         Start-Job -Name "ColorFix" -FilePath .\include\job_color_fix.ps1 -ArgumentList $RootDir, $videos | Out-Null
     }
 }
-
 function Set-FFmpegLowPriority {
-
-    $ffmpegProcesses = Get-Process ffmpeg -ErrorAction SilentlyContinue | 
-    Where-Object { $_.PriorityClass -ne 'BelowNormal' }
-        
-    if ($ffmpegProcesses) {
-        foreach ($process in $ffmpegProcesses) {
-            $process.PriorityClass = "BelowNormal"
+    try {
+        $ffmpegProcesses = Get-Process ffmpeg -ErrorAction SilentlyContinue | 
+        Where-Object { $_.PriorityClass -ne 'BelowNormal' }
+            
+        if ($ffmpegProcesses) {
+            foreach ($process in $ffmpegProcesses) {
+                $process.PriorityClass = "BelowNormal" 
+            }
         }
     }
-
+    catch {
+        # Silently continue if any errors occur
+    }
 }
-
-
 function Get-Videos() {
     get-job -Name Scan -ea silentlycontinue | Stop-Job -ea silentlycontinue | Out-Null  
 
@@ -255,20 +243,20 @@ function Write-SkipError ([string] $video_name) {
     }
 }
 
-function Write-ColorFixed ([string] $video_name) {
-    if ($video_name) { 
-        $Logfile = "$log_path\skipcolorfixed.txt"
-        $mutexName = 'Write-ColorFixed'
-        $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-        $check = $mutex.WaitOne() 
-        try {
-            Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-            return 
-        }
-        finally {
-            $mutex.ReleaseMutex()
-        }
-    }
-}
+# function Write-ColorFixed ([string] $video_name) {
+#     if ($video_name) { 
+#         $Logfile = "$log_path\skipcolorfixed.txt"
+#         $mutexName = 'Write-ColorFixed'
+#         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
+#         $check = $mutex.WaitOne() 
+#         try {
+#             Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
+#             return 
+#         }
+#         finally {
+#             $mutex.ReleaseMutex()
+#         }
+#     }
+# }
 
 Export-ModuleMember -Function *

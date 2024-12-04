@@ -92,19 +92,19 @@ Foreach ($video in $videos) {
                 }       
                 
                 Receive-Job -name *
-                Set-FFmpegLowPriority
+                
             }          
             if ($done -eq 1) { break }
         }
     }
 }
 
-Write-Log " Queue complete, waiting for running jobs to finish then quiting"
+Write-Log "-----------Queue complete, waiting for running jobs to finish then quiting-----------"
 while (get-job -State Running -ea silentlycontinue) {
     Start-Sleep 1
     Receive-Job *
 }   
 
-Write-Log " exiting"
+Write-Log "-----------exiting-----------"
 Start-Sleep 10
 exit
