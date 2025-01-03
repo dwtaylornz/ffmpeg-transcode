@@ -122,8 +122,7 @@ function Invoke-ColorFix() {
 }
 function Set-FFmpegLowPriority {
     try {
-        $ffmpegProcesses = Get-Process ffmpeg -ErrorAction SilentlyContinue | 
-        Where-Object { $_.PriorityClass -ne 'BelowNormal' }
+        $ffmpegProcesses = Get-Process ffmpeg -ErrorAction SilentlyContinue | Where-Object { $_.PriorityClass -ne 'BelowNormal' }
             
         if ($ffmpegProcesses) {
             foreach ($process in $ffmpegProcesses) {
