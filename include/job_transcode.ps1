@@ -35,11 +35,11 @@ if ($video_codec -notin $video_codec_skip_list -AND $video_age -gt $min_video_ag
     # Add to skip file so it is not processed again
     Write-Skip "$video_name"
 
-    if ($audio_codec -eq "aac" -AND $audio_channels -eq 2) {
-        $ffmpeg_parameters = $ffmpeg_parameters_copyaudio
-    } else {
-        $ffmpeg_parameters = $ffmpeg_parameters_encaudio
-    }
+    # if ($audio_codec -eq "aac" -AND $audio_channels -eq 2) {
+    #     $ffmpeg_parameters = $ffmpeg_parameters_copyaudio
+    # } else {
+    #     $ffmpeg_parameters = $ffmpeg_parameters_encaudio
+    # }
     $transcode_msg = "transcoding using ($ffmpeg_parameters)"
 
     $transcode_msg = "$transcode_msg..."
