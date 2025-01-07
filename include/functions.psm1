@@ -108,6 +108,12 @@ function Initialize-OutputFolder {
         Get-ChildItem -Path $outputPath -Recurse | Remove-Item -Force -Recurse
     }
 }
+
+function Get-VideoAge ([string] $video_path) {
+    $video_age = (Get-Date) - (Get-Item $video_path).CreationTime
+    $video_age = $video_age.Days
+    return $video_age
+}
 function Invoke-HealthCheck() {
     if ($run_health_check -eq 1) { 
         Write-Host "Running health scan..." 
@@ -241,21 +247,5 @@ function Write-SkipError ([string] $video_name) {
         }
     }
 }
-
-# function Write-ColorFixed ([string] $video_name) {
-#     if ($video_name) { 
-#         $Logfile = "$log_path\skipcolorfixed.txt"
-#         $mutexName = 'Write-ColorFixed'
-#         $mutex = New-Object 'Threading.Mutex' $false, $mutexName
-#         $check = $mutex.WaitOne() 
-#         try {
-#             Add-content $LogFile -value $video_name -Encoding utf8 -ErrorAction Stop
-#             return 
-#         }
-#         finally {
-#             $mutex.ReleaseMutex()
-#         }
-#     }
-# }
 
 Export-ModuleMember -Function *

@@ -18,9 +18,10 @@ $video_new_name = $video.Name
 
 # Write-Host "Check video codec first..."
 $video_codec = Get-VideoCodec "$video_path"
+$video_age = Get-VideoAge "$video_path"
 
 # GPU Offload...
-if ($video_codec -ne $video_codec_skip_list) {
+if ($video_codec -notin $video_codec_skip_list -AND $video_age -gt $min_video_age) {
 
     # check audio codec and channels, video width and duration
 
@@ -33,18 +34,21 @@ if ($video_codec -ne $video_codec_skip_list) {
 
     # Add to skip file so it is not processed again
     Write-Skip "$video_name"
-        
-    $transcode_msg = "transcoding using ($ffmpeg_parametres)"
+
+    if ($audio_codec -eq "aac" -AND $audio_channels -eq 2) {
+        $ffmpeg_parameters = $ffmpeg_parameters_copyaudio
+    } else {
+        $ffmpeg_parameters = $ffmpeg_parameters_encaudio
+    }
+    $transcode_msg = "transcoding using ($ffmpeg_parameters)"
 
     $transcode_msg = "$transcode_msg..."
-    Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`) $transcode_msg"    
+    Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`, $video_age days old) $transcode_msg"    
     
     $output_path = "output\$video_new_name"
  
     # Main FFMPEG Params 
-    $ffmpeg_params = ".\ffmpeg.exe -y -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -i `"$video_path`" $ffmpeg_parametres -max_muxing_queue_size 9999 `"$output_path`""
-
-    # Write-Host $ffmpeg_params
+    $ffmpeg_params = ".\ffmpeg.exe -y -hide_banner -err_detect ignore_err -ignore_unknown -v $ffmpeg_logging -i `"$video_path`" $ffmpeg_parameters -max_muxing_queue_size 9999 `"$output_path`""
 
     Invoke-Expression $ffmpeg_params -ErrorVariable err 
     if ($err) { 
@@ -66,8 +70,13 @@ if ($video_codec -ne $video_codec_skip_list) {
     }
 
 }
+elseif ($video_codec -in $video_codec_skip_list) {
+    Write-Log  "$job - $video_name ($video_codec, $video_size GB, $video_age days old) in video codec skip list, skipping"
+    Write-Skip $video_name
+    exit
+}
 else {
-    Write-Log  "$job - $video_name ($video_codec, $video_size GB) in video codec skip list, skipping"
+    Write-Log  "$job - $video_name ($video_codec, $video_size GB, $video_age days old) is too new to transcode, skipping"
     Write-Skip $video_name
     exit
 }
