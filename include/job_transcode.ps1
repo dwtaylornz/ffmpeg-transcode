@@ -21,7 +21,7 @@ $video_codec = Get-VideoCodec "$video_path"
 $video_age = Get-VideoAge "$video_path"
 
 # GPU Offload...
-if ($video_codec -notin $video_codec_skip_list -AND $video_age -gt $min_video_age) {
+if ($video_codec -notin $video_codec_skip_list -AND $video_age -ge $min_video_age) {
 
     # check audio codec and channels, video width and duration
 
@@ -161,4 +161,4 @@ catch {
     write-Log "$job - $video_name ERROR cannot find output\$video_new_name"
     Write-SkipError $video_name 
     exit
-}                                
+}
