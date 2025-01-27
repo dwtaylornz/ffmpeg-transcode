@@ -111,7 +111,11 @@ function Initialize-OutputFolder {
 
 function Get-VideoAge ([string] $video_path) {
     $video_age = (Get-Date) - (Get-Item $video_path).CreationTime
-    $video_age = $video_age.Days
+    if ($null -eq $video_age) {
+        $video_age = 0
+    } else {
+        $video_age = $video_age.Days
+    }
     return $video_age
 }
 function Invoke-HealthCheck() {
