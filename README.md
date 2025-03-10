@@ -18,6 +18,7 @@ A windows powershell script to re-encode media library videos using ffmpeg on wi
 - checks to see if video codec is on skip list
 - runs various checks that transcode was successful (length, file has video and audio stream, must be more than min % change)
 - writes **transcode.log** for logging 
+- ffmpeg set to low priority task (so you can still game!)
 
 ### limitations (potential todo list) 
 deminishing effort vs reward - 

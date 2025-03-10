@@ -20,11 +20,11 @@ foreach ($video in $videos) {
     }
     if ($null -eq $media_audiocodec) {
         $isBroken = $true
-        $brokenReason += "It has no audio stream. "
+        $brokenReason += "file has no audio stream. "
     }
     if ($null -eq $media_videocodec) {
         $isBroken = $true
-        $brokenReason += "It has no video stream. "
+        $brokenReason += "file has no video stream. "
     }
 
     if ($isBroken) {

@@ -32,19 +32,10 @@ if ($video_codec -notin $video_codec_skip_list -AND $video_age -ge $min_video_ag
 
     $start_time = (GET-Date)
 
-    # Add to skip file so it is not processed again
     Write-Skip "$video_name"
 
-    # if ($audio_codec -eq "aac" -AND $audio_channels -eq 2) {
-    #     $ffmpeg_parameters = $ffmpeg_parameters_copyaudio
-    # } else {
-    #     $ffmpeg_parameters = $ffmpeg_parameters_encaudio
-    # }
-    $transcode_msg = "transcoding using ($ffmpeg_parameters)"
-
-    $transcode_msg = "$transcode_msg..."
+    $transcode_msg = "transcoding using ($ffmpeg_parameters)..."
     Write-Log "$job - $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, $video_size`GB`, $video_age days old) $transcode_msg"    
-    
     $output_path = "output\$video_new_name"
  
     # Main FFMPEG Params 
@@ -77,7 +68,6 @@ elseif ($video_codec -in $video_codec_skip_list) {
 }
 else {
     Write-Log  "$job - $video_name ($video_codec, $video_size GB, $video_age days old) is too new to transcode, skipping"
-    Write-Skip $video_name
     exit
 }
 
@@ -109,26 +99,32 @@ try {
     if ($video_new_size -eq 0) { 
         Write-Log "$job - $video_new_name ERROR, zero file size ($video_new_size`GB`), File NOT moved" 
         Get-VideoDebugInfo
+        Write-SkipError $video_name 
     }
     elseif ($video_new_duration -lt ($video_duration - 10) -OR $video_new_duration -gt ($video_duration + 10)) { 
         Write-Log "$job - $video_new_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved" 
         Get-VideoDebugInfo
+        Write-SkipError $video_name 
     }
     elseif ($null -eq $video_new_videocodec) { 
         Write-Log "$job - $video_new_name ERROR, no video stream detected, File NOT moved" 
         Get-VideoDebugInfo
+        Write-SkipError $video_name 
     }
     elseif ($null -eq $video_new_audiocodec) { 
         Write-Log "$job - $video_new_name ERROR, no audio stream detected, File NOT moved" 
         Get-VideoDebugInfo
+        Write-SkipError $video_name 
     }
     elseif ($diff_percent -lt $ffmpeg_min_diff ) {
         Write-Log "$job - $video_new_name ERROR, min difference too small ($diff_percent% < $ffmpeg_min_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
         Get-VideoDebugInfo
+        Write-SkipError $video_name 
     } 
     elseif ($diff_percent -gt $ffmpeg_max_diff ) {
         Write-Log "$job - $video_new_name ERROR, max too high ($diff_percent% > $ffmpeg_max_diff%) $video_size`GB -> $video_new_size`GB, File NOT moved" 
         Get-VideoDebugInfo
+        Write-SkipError $video_name 
     }        
    
     elseif ($move_file -eq 0) { 
@@ -138,15 +134,15 @@ try {
     # File passes all checks, move....
     else { 
         Write-Log "$job - $video_new_name Transcode time: $total_time_formatted ($gb_per_minute GB/m), Saved: $diff`GB` ($video_size -> $video_new_size) or $diff_percent%"
-        Write-Host "  $video_new_name (duration $video_duration -> $video_new_duration, video codec $video_codec -> $video_new_videocodec, audio codec $audio_codec -> $video_new_audiocodec)"
+        Write-Host "  $video_new_name (video codec $video_codec -> $video_new_videocodec, audio codec $audio_codec -> $video_new_audiocodec)"
         try {
             Start-delay
-            # Write-Log "$job - $video_new_name Moving file to source location ($output_path -> $video_path)"
-            Move-item -Path "$output_path" -destination "$video_path" -Force 
+            # Write-Log "  Moving file to source location ($output_path -> $video_path)"
+            Move-Item -LiteralPath "$output_path" -Destination "$video_path" -Force 
             Write-Skip $video_new_name
             Start-Sleep 2
-            if (Test-Path "$output_path") { 
-                Remove-Item "$output_path" -Force
+            if (Test-Path -LiteralPath "$output_path") { 
+                Remove-Item -LiteralPath "$output_path" -Force
             }
         }
         catch {
@@ -161,4 +157,4 @@ catch {
     write-Log "$job - $video_name ERROR cannot find output\$video_new_name"
     Write-SkipError $video_name 
     exit
-}
+}                                
