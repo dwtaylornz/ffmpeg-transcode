@@ -1,62 +1,4 @@
-
-function Get-VideoCodec ([string] $video_path) {
-    $video_codec = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`")
-    $codec_patterns = "hevc", "h264", "vc1", "mpeg2video", "mpeg4", "rawvideo", "vp9", "av1"
-
-    foreach ($pattern in $codec_patterns) {
-        if (Select-String -pattern $pattern -InputObject $video_codec -quiet) { 
-            $video_codec = $pattern
-            break
-        }
-    }
-    return $video_codec
-}
-function Get-AudioCodec ([string] $video_path) {
-    $audio_codec = .\ffprobe.exe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`"
-    return $audio_codec
-}
-function Get-AudioChannels ([string] $video_path) {
-    $audio_channels = $null
-    $audio_channels = .\ffprobe.exe -v quiet -select_streams a:0 -show_entries stream=channels -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`"
-    return $audio_channels
-}
-function Get-VideoWidth ([string] $video_path) {
-    $video_width = (.\ffprobe.exe -loglevel quiet -show_entries stream=width -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String
-    if ($video_width -eq "N/A") { 
-        $video_width = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String 
-    }   
-    $video_width = $video_width.trim().Split("")[0]
-    if ($video_width -eq "1920") { $video_width = "1920" }   
-    try {  
-        $video_width = [Int]$video_width 
-    }
-    catch { 
-        Write-Host "  $video_path width issue"
-    }
-    return $video_width
-}
-function Get-VideoHeight ([string] $video_path) {
-    $video_height = (.\ffprobe.exe -loglevel quiet -show_entries stream=height -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String
-    if ($video_height -eq "N/A") { 
-        $video_height = (.\ffprobe.exe -v quiet -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1  "`"$video_path"`") | Out-String 
-    }   
-    $video_height = $video_height.trim().Split("")[0]
-    if ($video_height -eq "1080") { $video_height = "1080" }   
-    try {  
-        $video_height = [Int]$video_height 
-    }
-    catch { 
-        Write-Host "  $video_path height issue"
-    }
-    return $video_height
-}
-function Get-VideoDuration ([string] $video_path) {
-    $video_duration = (.\ffprobe.exe -loglevel quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "`"$video_path"`") | Out-String
-    $video_duration = $video_duration.trim()
-    try { $video_duration = [int]$video_duration }
-    catch { write-host "  "$video.name" duation issue" }
-    return $video_duration
-}
+# Description: This module contains functions for video processing, logging, and system checks.
 function Get-VideoDebugInfo () {
     Write-Host "Debug Info for $video_name"
     Write-Host "  output_path: $output_path"
@@ -168,7 +110,7 @@ function Get-Videos() {
         Write-Host "Getting previous scan results" 
     }
 
-    Write-Host "File Count: " $videos.Count
+    Write-Host "File Count:" $videos.Count
 
     return $videos
 }
@@ -253,6 +195,24 @@ function Write-SkipError ([string] $video_name) {
             $mutex.ReleaseMutex()
         }
     }
+}
+
+function Get-MediaInfo ([string] $video_path) {
+    $ffprobeOutput = & .\ffprobe.exe -v quiet -print_format json -show_streams -show_format "`"$video_path`"" | Out-String | ConvertFrom-Json
+
+    $videoStream = $ffprobeOutput.streams | Where-Object { $_.codec_type -eq 'video' } | Select-Object -First 1
+    $audioStream = $ffprobeOutput.streams | Where-Object { $_.codec_type -eq 'audio' } | Select-Object -First 1
+    $format = $ffprobeOutput.format
+
+    $mediaInfo = @{
+        VideoCodec    = $videoStream.codec_name
+        AudioCodec    = $audioStream.codec_name
+        AudioChannels = $audioStream.channels
+        VideoWidth    = $videoStream.width
+        VideoHeight   = $videoStream.height
+        VideoDuration = [int]([math]::Round([double]$format.duration,0))
+    }
+    return $mediaInfo
 }
 
 Export-ModuleMember -Function *

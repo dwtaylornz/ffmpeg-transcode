@@ -17,7 +17,8 @@ $video_size = [math]::Round($video.length / 1GB, 1)
 $video_new_name = $video.Name
 
 # Write-Host "Check video codec first..."
-$video_codec = Get-VideoCodec "$video_path"
+$orignalMedia = Get-MediaInfo "$video_path" 
+$video_codec = $orignalMedia["VideoCodec"]
 $video_age = Get-VideoAge "$video_path"
 
 # GPU Offload...
@@ -25,10 +26,12 @@ if ($video_codec -notin $video_codec_skip_list -AND $video_age -ge $min_video_ag
 
     # check audio codec and channels, video width and duration
 
-    $audio_codec = Get-AudioCodec "$video_path"
-    $audio_channels = Get-AudioChannels "$video_path"
-    $video_width = Get-VideoWidth "$video_path"
-    $video_duration = Get-VideoDuration "$video_path"
+    # $orignalMedia = Get-MediaInfo "$video_path" 
+
+    $audio_codec = $orignalMedia["AudioCodec"]
+    $audio_channels = $orignalMedia["AudioChannels"]
+    $video_width = $orignalMedia["VideoWidth"]
+    $video_duration = $orignalMedia["VideoDuration"]
 
     $start_time = (GET-Date)
 
@@ -91,9 +94,11 @@ try {
     # Write-Host "video_new_size: $video_new_size"
 
     # check 
-    $video_new_duration = Get-VideoDuration "output\$video_new_name"
-    $video_new_videocodec = Get-VideoCodec "output\$video_new_name"
-    $video_new_audiocodec = Get-AudioCodec "output\$video_new_name"
+    $newMedia = Get-MediaInfo "output\$video_new_name"
+
+    $video_new_duration = $newMedia["VideoDuration"]
+    $video_new_videocodec = $newMedia["VideoCodec"]
+    $video_new_audiocodec = $newMedia["AudioCodec"]
                             
     # run checks, if ok then move... 
     if ($video_new_size -eq 0) { 
@@ -157,4 +162,4 @@ catch {
     write-Log "$job - $video_name ERROR cannot find output\$video_new_name"
     Write-SkipError $video_name 
     exit
-}                                
+}

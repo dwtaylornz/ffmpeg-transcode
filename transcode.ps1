@@ -14,7 +14,7 @@ Import-Module ".\include\functions.psm1" -Force
 . (Join-Path $RootDir variables.ps1)
 
 Write-Host ""
-Write-Log " Starting..."
+Write-Log "Starting..."
 Write-Host ""
 
 # Setup temp output folder, and clear previous transcodes
