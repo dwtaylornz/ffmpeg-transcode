@@ -1,55 +1,45 @@
 #!/usr/bin/env bash
 #
 # FFmpeg Video Transcoding Script
-# 
-# This script processes video files using hardware-accelerated AV1 encoding
-# with VAAPI. It scans a directory for video files, transcodes them using
-# multiple GPU threads, and manages the process with skip lists and error
-# handling.
-#
-# Features:
-# - Hardware-accelerated AV1 encoding with VAAPI
-# - Multi-threaded processing with configurable GPU threads
-# - Skip lists for processed and errored files
-# - Size and duration validation
-# - Automatic queue restart and timeout handling
-#
-# Transcode script for Linux using ffmpeg
 
 set -euo pipefail
 
 # Video processing settings
-MEDIA_PATH="/var/mnt/videos" # no trailing slash
+MEDIA_PATH="/var/mnt/videos/videos/movies" # no leading slash
 MIN_VIDEO_SIZE=3000 # Minimum size in MB before quitting
-MIN_VIDEO_AGE=30     # Minimum age of file to process (days)
+MIN_VIDEO_AGE=60     # Minimum age of file to process (days)
+FFMPEG_OUTPUT_PARAMS="-vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy -b:v 5M -maxrate 10M -bufsize 10M -max_muxing_queue_size 9999"
 
-LOG_PATH="."
-GPU_THREADS=2 # How many GPU jobs at same time
 
-SCAN_AT_START=1 # 0 = get previous results and run background scan, 1 = force scan and wait for results, 2 = get results no scan
+THREADS=2 # How ffmpeg jobs at same time
+FFMPEG_INPUT_PARAMS="-err_detect ignore_err -ignore_unknown -vaapi_device /dev/dri/renderD128"
+# FFMPEG_OUTPUT_PARAMS="-vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy -b:v 5M -maxrate 10M -bufsize 10M -max_muxing_queue_size 9999"
+# FFMPEG_OUTPUT_PARAMS="-vf 'format=nv12,hwupload' -c:v av1_vaapi -rc_mode CQP -qp 22 -quality 2 -c:a copy -max_muxing_queue_size 9999"
+
+SCAN_AT_START=0             # 0 = use previous results and run background scan, 1 = force scan and wait for results
 RESTART_QUEUE=720           # Minutes before re-doing the scan and start going through the queue again
 FFMPEG_LOGGING="quiet"      # ffmpeg log level
 FFMPEG_TIMEOUT=6000         # Timeout on job (minutes)
 FFMPEG_MIN_DIFF=10          # Must be at least this much smaller (percentage)
 FFMPEG_MAX_DIFF=99          # Must not save more than this (percentage)
-VIDEO_CODEC_SKIP_LIST="av1" # Comma-separated list of video codecs to skip
+VIDEO_CODEC_SKIP_LIST="av1,hevc" # Comma-separated list of video codecs to skip
 MOVE_FILE=1                 # Set to 0 for testing (check ./output directory)
 
 # Constants for magic numbers
-DAYS_TO_SECONDS=86400       # Seconds in a day (24 * 60 * 60)
-MINUTES_TO_SECONDS=60       # Seconds in a minute
-FFMPEG_NICE_PRIORITY=15     # Nice priority level for ffmpeg processes
-DURATION_TOLERANCE=10       # Tolerance in seconds for duration checks (±10 seconds)
-SLEEP_BEFORE_CODEC_CHECK=1  # Sleep duration when skipping codec
-SLEEP_BEFORE_MOVE=5         # Sleep duration before moving file
-SLEEP_AFTER_MOVE=2          # Sleep duration after moving file
+DAYS_TO_SECONDS=86400      # Seconds in a day (24 * 60 * 60)
+MINUTES_TO_SECONDS=60      # Seconds in a minute
+FFMPEG_NICE_PRIORITY=15    # Nice priority level for ffmpeg processes
+DURATION_TOLERANCE=10      # Tolerance in seconds for duration checks (±10 seconds)
+SLEEP_BEFORE_CODEC_CHECK=1 # Sleep duration when skipping codec
+SLEEP_BEFORE_MOVE=5        # Sleep duration before moving file
+SLEEP_AFTER_MOVE=2         # Sleep duration after moving file
 
 # ANSI Color codes for terminal output
-COLOR_RED='\033[1;91m'      # Bold bright red for errors/warnings (brightest)
-COLOR_ORANGE='\033[0;33m'   # Orange for warnings (darker orange)
-COLOR_YELLOW='\033[1;93m'   # Bold bright yellow for success (brightest)
-COLOR_GREEN='\033[1;92m'    # Bold bright green for info (brightest)
-COLOR_RESET='\033[0m'       # Reset color
+COLOR_RED='\033[1;91m'    # Bold bright red for errors/warnings (brightest)
+COLOR_ORANGE='\033[0;33m' # Orange for warnings (darker orange)
+COLOR_YELLOW='\033[1;93m' # Bold bright yellow for success (brightest)
+COLOR_GREEN='\033[1;92m'  # Bold bright green for info (brightest)
+COLOR_RESET='\033[0m'     # Reset color
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -57,7 +47,7 @@ COLOR_RESET='\033[0m'       # Reset color
 
 write_log() {
     local log_string="$1"
-    local log_file="$LOG_PATH/transcode.log"
+    local log_file="./transcode.log"
     local stamp
     stamp="$(date '+%y/%m/%d %H:%M:%S')"
     local log_message="$stamp $log_string"
@@ -78,12 +68,12 @@ write_log() {
 
 write_skip() {
     local video_name="$1"
-    echo "$video_name" >>"$LOG_PATH/skip.txt"
+    echo "$video_name" >>"./skip.txt"
 }
 
 write_skip_error() {
     local video_name="$1"
-    echo "$video_name" >>"$LOG_PATH/skiperror.txt"
+    echo "$video_name" >>"./skiperror.txt"
 }
 
 initialize_output_folder() {
@@ -115,35 +105,23 @@ get_media_info() {
 
 show_state() {
     local skipped_count
-    skipped_count=$(wc -l <"$LOG_PATH/skip.txt" 2>/dev/null || echo 0)
+    skipped_count=$(wc -l <"./skip.txt" 2>/dev/null || echo 0)
     local skippederror_count
-    skippederror_count=$(wc -l <"$LOG_PATH/skiperror.txt" 2>/dev/null || echo 0)
+    skippederror_count=$(wc -l <"./skiperror.txt" 2>/dev/null || echo 0)
     local skiptotal_count
     skiptotal_count=$((skipped_count + skippederror_count))
+    write_log "Started processing on $HOSTNAME"
     echo ""
     echo "  Previously processed files: $skipped_count"
     echo "  Previously errored files: $skippederror_count"
     echo "  Total files to skip: $skiptotal_count"
-    echo "  Settings - Min Age: $MIN_VIDEO_AGE, Min Size: $MIN_VIDEO_SIZE, Threads: $GPU_THREADS, Timeout: $FFMPEG_TIMEOUT, Restart Queue: $RESTART_QUEUE"
+    echo "  Settings - Min Age: $MIN_VIDEO_AGE, Min Size: $MIN_VIDEO_SIZE, Threads: $THREADS, Timeout: $FFMPEG_TIMEOUT, Restart Queue: $RESTART_QUEUE"
+    echo "  ffmpeg output params: $FFMPEG_OUTPUT_PARAMS"
     echo ""
 }
 
-set_ffmpeg_low_priority() {
-    local pids
-    pids=$(pgrep ffmpeg 2>/dev/null || true)
-    if [[ -n "$pids" ]]; then
-        while read -r pid; do
-            local current_nice
-            current_nice=$(ps -o ni= -p "$pid" 2>/dev/null || echo "")
-            if [[ -n "$current_nice" && "$current_nice" != "$FFMPEG_NICE_PRIORITY" ]]; then
-                renice +$FFMPEG_NICE_PRIORITY "$pid" >/dev/null 2>&1 || true
-            fi
-        done <<<"$pids"
-    fi
-}
-
 run_media_scan() {
-    local output_csv="$LOG_PATH/scan_results.csv"
+    local output_csv="$1"
     : >"$output_csv"
     find "$MEDIA_PATH" -type f \
         \( -iname '*.mkv' -o -iname '*.avi' -o -iname '*.ts' -o -iname '*.mov' -o -iname '*.y4m' -o -iname '*.m2ts' -o -iname '*.mp4' -o -iname '*.wmv' \) \
@@ -185,12 +163,12 @@ run_job_transcode() {
             break
         fi
     done
-    
+
     # Add early return for skip case to avoid duplicate logging
     if [[ $skip_codec -eq 1 ]]; then
         return 0
     fi
-    
+
     if [[ $video_age -ge $MIN_VIDEO_AGE ]]; then
         local audio_codec
         audio_codec=$(echo "$media_info_json" | jq -r '.streams[] | select(.codec_type=="audio") | .codec_name' | head -n1)
@@ -207,7 +185,7 @@ run_job_transcode() {
         # Create job-specific folder and output path
         local job_folder="/dev/shm/ffmpeg-transcode/job_${job//[()]/}"
         local output_path="$job_folder/$video_name"
-        
+
         # Clean up any existing job folder before starting
         if [[ -d "$job_folder" ]]; then
             rm -rf "$job_folder"
@@ -215,41 +193,58 @@ run_job_transcode() {
         mkdir -p "$job_folder"
 
         # Build ffmpeg command
-        local ffmpeg_cmd="ffmpeg -y -err_detect ignore_err -ignore_unknown -vaapi_device /dev/dri/renderD128 -v $FFMPEG_LOGGING \
-    -i \"$video_path\" \
-    -vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy \
-    -b:v 3M -maxrate 5M -bufsize 5M \
-    -max_muxing_queue_size 9999 \
-    \"$output_path\""
+        local ffmpeg_cmd="ffmpeg -y \
+        $FFMPEG_INPUT_PARAMS \
+        -v $FFMPEG_LOGGING \
+        -i \"$video_path\" \
+        $FFMPEG_OUTPUT_PARAMS \
+        \"$output_path\""
 
-        # Start ffmpeg in background and monitor size
-        eval "$ffmpeg_cmd" &
+        # Start ffmpeg in background and monitor size with low priority
+        # echo "Running ffmpeg command: $ffmpeg_cmd"
+        eval "nice -n $FFMPEG_NICE_PRIORITY $ffmpeg_cmd" &
         local ffmpeg_pid=$!
-        
+
         # Start size monitoring in background
         monitor_output_size "$output_path" "$video_size" "$ffmpeg_pid" "$job" "$video_name" &
         local monitor_pid=$!
-        
+
         # Wait for ffmpeg to complete
         if wait "$ffmpeg_pid"; then
             # Kill the monitor process since ffmpeg completed successfully
             kill "$monitor_pid" 2>/dev/null || true
             wait "$monitor_pid" 2>/dev/null || true
+            # Clean up any monitor flag file
+            rm -f "/tmp/monitor_kill_${ffmpeg_pid}" 2>/dev/null || true
             # Post-transcode checks
             post_transcode_checks "$video_path" "$output_path" "$video_name" "$video_codec" "$audio_codec" "$video_duration" "$video_size" "$job" "$start_time"
         else
-            # ffmpeg failed or was killed by monitor
+            # ffmpeg failed or was killed by monitor - check for monitor flag file
+            local monitor_flag="/tmp/monitor_kill_${ffmpeg_pid}"
+            local monitor_killed_ffmpeg=0
+            
+            if [[ -f "$monitor_flag" ]]; then
+                # Monitor created flag file, so it killed ffmpeg
+                monitor_killed_ffmpeg=1
+                rm -f "$monitor_flag" 2>/dev/null || true
+            fi
+            
+            # Clean up monitor process
             kill "$monitor_pid" 2>/dev/null || true
             wait "$monitor_pid" 2>/dev/null || true
-            write_log "$job $video_name ERROR: ffmpeg command failed or was cancelled"
+
+            if [[ $monitor_killed_ffmpeg -eq 1 ]]; then
+                write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original)"
+            else
+                write_log "$job $video_name ERROR: ffmpeg command failed or crashed"
+            fi
             write_skip_error "$video_name"
             # Clean up job folder on failure
             cleanup_job_folder "$output_path"
             return 1
         fi
     else
-        write_log "$video_name ($video_codec, $video_size MB, $video_age days old) in video codec skip list or too new, skipping"
-        write_skip "$video_name"
+        write_log "$job $video_name ($video_codec, $video_size MB, $video_age days old) too new, skipping"
         return 0
     fi
 }
@@ -273,6 +268,9 @@ monitor_output_size() {
     local ffmpeg_pid="$3"
     local job="$4"
     local video_name="$5"
+
+    # Create a flag file to indicate monitor killed ffmpeg
+    local monitor_flag="/tmp/monitor_kill_${ffmpeg_pid}"
     
     # Monitor every 10 seconds
     while kill -0 "$ffmpeg_pid" 2>/dev/null; do
@@ -282,6 +280,8 @@ monitor_output_size() {
             current_size_mb=$(du -m "$output_path" | awk '{print $1}')
             if [[ $current_size_mb -gt $original_size_mb ]]; then
                 write_log "$job $video_name WARN: Output file ($current_size_mb MB) is larger than original ($original_size_mb MB), killing transcode"
+                # Create flag file before killing
+                touch "$monitor_flag"
                 kill -TERM "$ffmpeg_pid" 2>/dev/null || true
                 sleep 5
                 kill -9 "$ffmpeg_pid" 2>/dev/null || true
@@ -289,6 +289,8 @@ monitor_output_size() {
             fi
         fi
     done
+    # Clean up flag file if we exit normally
+    rm -f "$monitor_flag" 2>/dev/null || true
     return 0
 }
 
@@ -423,31 +425,48 @@ post_transcode_checks() {
 # MAIN EXECUTION
 # ============================================================================
 
+# Show initial state
+show_state
+
 # Setup temp output folder, and clear previous transcodes
 initialize_output_folder
 
 # Get Videos - run Scan job at MEDIA_PATH or retrieve videos from scan_results.csv
-SCAN_RESULTS="$LOG_PATH/scan_results.csv"
+SCAN_RESULTS="./scan_results.csv"
+SCAN_RESULTS_TMP="./scan_results.tmp"
 if [[ $SCAN_AT_START -eq 1 || ! -f "$SCAN_RESULTS" ]]; then
-    run_media_scan
+    run_media_scan "$SCAN_RESULTS"
 elif [[ $SCAN_AT_START -eq 0 ]]; then
-    # Run scan in background to update results for next run
-    run_media_scan &
+    # Only run scan in background if scan_results.csv exists and has at least 1 line
+    if [[ -f "$SCAN_RESULTS" && $(wc -l <"$SCAN_RESULTS") -ge 1 ]]; then
+        (run_media_scan "$SCAN_RESULTS_TMP" && mv -f "$SCAN_RESULTS_TMP" "$SCAN_RESULTS") &
+    else
+        run_media_scan "$SCAN_RESULTS"
+        # After foreground scan, check again for results
+        if [[ ! -f "$SCAN_RESULTS" || $(wc -l <"$SCAN_RESULTS") -eq 0 ]]; then
+            echo "[ERROR] No videos found after scan. Exiting."
+            exit 1
+        fi
+    fi
 fi
 
 mapfile -t videos < <(awk -F, '{print $1}' "$SCAN_RESULTS")
 
 # Get previously skipped files from skip.txt and skiperror.txt
-SKIP_FILE="$LOG_PATH/skip.txt"
-SKIPERROR_FILE="$LOG_PATH/skiperror.txt"
-skipped_files=()
-skippederror_files=()
-[[ -f "$SKIP_FILE" ]] && mapfile -t skipped_files <"$SKIP_FILE"
-[[ -f "$SKIPERROR_FILE" ]] && mapfile -t skippederror_files <"$SKIPERROR_FILE"
-skiptotal_files=("${skipped_files[@]}" "${skippederror_files[@]}")
-
-# Show settings and any jobs running
-show_state
+SKIP_FILE="./skip.txt"
+SKIPERROR_FILE="./skiperror.txt"
+declare -A skip_lookup
+# Build associative array for O(1) lookups
+if [[ -f "$SKIP_FILE" ]]; then
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && skip_lookup["$line"]=1
+    done < "$SKIP_FILE"
+fi
+if [[ -f "$SKIPERROR_FILE" ]]; then
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && skip_lookup["$line"]=1
+    done < "$SKIPERROR_FILE"
+fi
 
 # ============================================================================
 # MAIN PROCESSING LOOP
@@ -462,18 +481,25 @@ for video in "${videos[@]}"; do
     if [[ $RESTART_QUEUE -ne 0 && $duration -gt $RESTART_QUEUE ]]; then
         run_media_scan
         mapfile -t videos < <(awk -F, '{print $1}' "$SCAN_RESULTS")
-        [[ -f "$SKIP_FILE" ]] && mapfile -t skipped_files <"$SKIP_FILE"
-        [[ -f "$SKIPERROR_FILE" ]] && mapfile -t skippederror_files <"$SKIPERROR_FILE"
-        skiptotal_files=("${skipped_files[@]}" "${skippederror_files[@]}")
+        # Rebuild skip lookup hash table
+        unset skip_lookup
+        declare -A skip_lookup
+        if [[ -f "$SKIP_FILE" ]]; then
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && skip_lookup["$line"]=1
+            done < "$SKIP_FILE"
+        fi
+        if [[ -f "$SKIPERROR_FILE" ]]; then
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && skip_lookup["$line"]=1
+            done < "$SKIPERROR_FILE"
+        fi
         queue_timer=$(date +%s)
     fi
 
-    # Skip if in skip list
-    skip=0
-    for skipfile in "${skiptotal_files[@]}"; do
-        [[ "$(basename "$video")" == "$skipfile" ]] && skip=1 && break
-    done
-    [[ $skip -eq 1 ]] && continue
+    # Skip if in skip list - O(1) lookup
+    video_basename="$(basename "$video")"
+    [[ -n "${skip_lookup[$video_basename]:-}" ]] && continue
 
     # Check min video size (in MB)
     video_size_mb=$(du -m "$video" | awk '{print $1}')
@@ -485,7 +511,7 @@ for video in "${videos[@]}"; do
     # Job management loop (thread pool)
     while true; do
         done_flag=0
-        for ((thread = 1; thread <= GPU_THREADS; thread++)); do
+        for ((thread = 1; thread <= THREADS; thread++)); do
             job_name="GPU_$thread"
             pid_var="JOB_PID_$thread"
             start_var="JOB_START_$thread"
@@ -516,7 +542,7 @@ for video in "${videos[@]}"; do
         if [[ $done_flag -eq 1 ]]; then
             break
         fi
-        set_ffmpeg_low_priority
+        sleep 1  # Brief pause to avoid tight loop
     done
 done
 
@@ -524,8 +550,8 @@ done
 # CLEANUP AND EXIT
 # ============================================================================
 
-write_log "-----------Queue complete, waiting for running jobs to finish then quitting-----------"
-for ((thread = 1; thread <= GPU_THREADS; thread++)); do
+write_log "Queue complete, waiting for running jobs to finish then quitting"
+for ((thread = 1; thread <= THREADS; thread++)); do
     pid_var="JOB_PID_$thread"
     pid="${!pid_var:-}"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -533,5 +559,5 @@ for ((thread = 1; thread <= GPU_THREADS; thread++)); do
     fi
 done
 
-write_log "-----------exiting-----------"
+write_log "Finished processing on bazzite"
 exit 0
