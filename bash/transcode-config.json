@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "movies",
+            "media_path": "/var/mnt/videos/videos/movies",
+            "min_video_size": 0,
+            "min_video_age": 30,
+            "ffmpeg_output_params": "-vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy -b:v 5M -maxrate 10M -bufsize 10M -max_muxing_queue_size 9999",
+            "video_codec_skip_list": "av1,hevc"
+        },
+        {
+            "name": "series",
+            "media_path": "/var/mnt/videos/videos/series",
+            "min_video_size": 0,
+            "min_video_age": 30,
+            "ffmpeg_output_params": "-vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy -b:v 5M -maxrate 10M -bufsize 10M -max_muxing_queue_size 9999",
+            "video_codec_skip_list": "av1,hevc"
+        }
+    ]
+}
