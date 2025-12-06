@@ -216,10 +216,10 @@ run_job_transcode() {
     local video_codec audio_codec audio_channels video_width video_duration_float
     read -r video_codec audio_codec audio_channels video_width video_duration_float <<< $(echo "$media_info_json" | jq -r '
         [
-            (.streams[] | select(.codec_type=="video") | .codec_name) // "null",
-            (.streams[] | select(.codec_type=="audio") | .codec_name) // "null",
-            (.streams[] | select(.codec_type=="audio") | .channels) // 0,
-            (.streams[] | select(.codec_type=="video") | .width) // 0,
+            (.streams[] | select(.codec_type=="video") | .codec_name) // "null" | first,
+            (.streams[] | select(.codec_type=="audio") | .codec_name) // "null" | first,
+            (.streams[] | select(.codec_type=="audio") | .channels) // 0 | first,
+            (.streams[] | select(.codec_type=="video") | .width) // 0 | first,
             (.format.duration) // 0
         ] | map(tostring) | join(" ")
     ')
