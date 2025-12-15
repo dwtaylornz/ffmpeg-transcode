@@ -6,7 +6,7 @@ set -euo pipefail
 # CONFIGURATION & ARGUMENTS
 # ============================================================================
 # Thread management
-THREADS=3 # How ffmpeg jobs at same time
+THREADS=2 # How ffmpeg jobs at same time
 FFMPEG_INPUT_PARAMS="-err_detect ignore_err -ignore_unknown -vaapi_device /dev/dri/renderD128"
 # Scanning & queue management
 SCAN_AT_START=1             # 0 = use previous results and run background scan, 1 = force scan and wait for results
