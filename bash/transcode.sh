@@ -636,5 +636,8 @@ for ((thread = 1; thread <= THREADS; thread++)); do
         wait "$pid"
     fi
 done
+# Remove skip files to ensure next run scans everything again
+rm -f "./skip.txt" "./skiperror.txt"
+write_log "Removed skip files - next run will scan all files"
 write_log "Finished processing"
 exit 0
