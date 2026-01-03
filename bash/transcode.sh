@@ -11,7 +11,7 @@ FFMPEG_INPUT_PARAMS="-err_detect ignore_err -ignore_unknown -vaapi_device /dev/d
 # Scanning & queue management
 SCAN_AT_START=1             # 0 = use previous results and run background scan, 1 = force scan and wait for results
 RESTART_QUEUE=720           # Minutes before re-doing the scan and start going through the queue again
-FFMPEG_LOGGING="quiet"      # ffmpeg log level
+FFMPEG_LOGGING="error"      # ffmpeg log level (quiet/error/warning/info)
 FFMPEG_TIMEOUT=6000         # Timeout on job (minutes)
 # File size & compression requirements
 FFMPEG_MIN_DIFF=5           # Must be at least this much smaller (percentage)
@@ -256,59 +256,87 @@ run_job_transcode() {
         start_time=$(date +%s)
         # write_skip "$video_name"
         write_log "$job $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, ${video_size}MB, $video_age days old) transcoding..."
-        # Create job-specific folder and output path
-        local job_folder="/dev/shm/ffmpeg-transcode/job_${job//[()]/}"
-        local output_path="$job_folder/$video_name"
-        # Clean up any existing job folder before starting
-        if [[ -d "$job_folder" ]]; then
-            rm -rf "$job_folder"
-        fi
-        mkdir -p "$job_folder"
-        # Build ffmpeg command
-        local ffmpeg_cmd="ffmpeg -y \
-        $FFMPEG_INPUT_PARAMS \
-        -v $FFMPEG_LOGGING \
-        -i \"$video_path\" \
-        $ffmpeg_output_params \
-        \"$output_path\""
-        # Start ffmpeg in background and monitor size with low priority
-        # echo "Running ffmpeg command: $ffmpeg_cmd"
-        eval "nice -n $FFMPEG_NICE_PRIORITY $ffmpeg_cmd" &
-        local ffmpeg_pid=$!
-        # Start size monitoring in background
-        monitor_output_size "$output_path" "$video_size" "$ffmpeg_pid" "$job" "$video_name" &
-        local monitor_pid=$!
-        # Wait for ffmpeg to complete
-        if wait "$ffmpeg_pid"; then
-            # Kill the monitor process since ffmpeg completed successfully
-            kill "$monitor_pid" 2>/dev/null || true
-            wait "$monitor_pid" 2>/dev/null || true
-            # Clean up any monitor flag file
-            rm -f "/tmp/monitor_kill_${ffmpeg_pid}" 2>/dev/null || true
-            # Post-transcode checks
-            post_transcode_checks "$video_path" "$output_path" "$video_name" "$video_codec" "$audio_codec" "$video_duration" "$video_size" "$job" "$start_time"
-        else
-            # ffmpeg failed or was killed by monitor - check for monitor flag file
-            local monitor_flag="/tmp/monitor_kill_${ffmpeg_pid}"
-            local monitor_killed_ffmpeg=0
-            
-            if [[ -f "$monitor_flag" ]]; then
-                # Monitor created flag file, so it killed ffmpeg
-                monitor_killed_ffmpeg=1
-                rm -f "$monitor_flag" 2>/dev/null || true
+
+        # Retry logic for transient VAAPI failures
+        local max_attempts=2
+        local attempt=1
+        local transcode_success=0
+
+        while [[ $attempt -le $max_attempts && $transcode_success -eq 0 ]]; do
+            if [[ $attempt -gt 1 ]]; then
+                write_log "$job $video_name WARN: Retry attempt $attempt of $max_attempts after previous failure"
+                sleep 2  # Brief pause before retry
             fi
-            
-            # Clean up monitor process
-            kill "$monitor_pid" 2>/dev/null || true
-            wait "$monitor_pid" 2>/dev/null || true
-            if [[ $monitor_killed_ffmpeg -eq 1 ]]; then
-                write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original)"
+
+            # Create job-specific folder and output path
+            local job_folder="/dev/shm/ffmpeg-transcode/job_${job//[()]/}"
+            local output_path="$job_folder/$video_name"
+            # Clean up any existing job folder before starting
+            if [[ -d "$job_folder" ]]; then
+                rm -rf "$job_folder"
+            fi
+            mkdir -p "$job_folder"
+            # Build ffmpeg command
+            local ffmpeg_cmd="ffmpeg -y \
+            $FFMPEG_INPUT_PARAMS \
+            -v $FFMPEG_LOGGING \
+            -i \"$video_path\" \
+            $ffmpeg_output_params \
+            \"$output_path\""
+            # Start ffmpeg in background and monitor size with low priority
+            # echo "Running ffmpeg command: $ffmpeg_cmd"
+            eval "nice -n $FFMPEG_NICE_PRIORITY $ffmpeg_cmd" &
+            local ffmpeg_pid=$!
+            # Start size monitoring in background
+            monitor_output_size "$output_path" "$video_size" "$ffmpeg_pid" "$job" "$video_name" &
+            local monitor_pid=$!
+            # Wait for ffmpeg to complete
+            if wait "$ffmpeg_pid"; then
+                # Kill the monitor process since ffmpeg completed successfully
+                kill "$monitor_pid" 2>/dev/null || true
+                wait "$monitor_pid" 2>/dev/null || true
+                # Clean up any monitor flag file
+                rm -f "/tmp/monitor_kill_${ffmpeg_pid}" 2>/dev/null || true
+                # Post-transcode checks
+                if post_transcode_checks "$video_path" "$output_path" "$video_name" "$video_codec" "$audio_codec" "$video_duration" "$video_size" "$job" "$start_time"; then
+                    transcode_success=1
+                else
+                    # Post-transcode checks failed, retry if attempts remain
+                    attempt=$((attempt + 1))
+                fi
             else
-                write_log "$job $video_name ERROR: ffmpeg command failed or crashed"
+                # ffmpeg failed or was killed by monitor - check for monitor flag file
+                local monitor_flag="/tmp/monitor_kill_${ffmpeg_pid}"
+                local monitor_killed_ffmpeg=0
+
+                if [[ -f "$monitor_flag" ]]; then
+                    # Monitor created flag file, so it killed ffmpeg
+                    monitor_killed_ffmpeg=1
+                    rm -f "$monitor_flag" 2>/dev/null || true
+                fi
+
+                # Clean up monitor process
+                kill "$monitor_pid" 2>/dev/null || true
+                wait "$monitor_pid" 2>/dev/null || true
+
+                if [[ $monitor_killed_ffmpeg -eq 1 ]]; then
+                    write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original)"
+                    # Don't retry if monitor killed it - file won't get smaller
+                    write_skip_error "$video_name"
+                    cleanup_job_folder "$output_path"
+                    return 1
+                else
+                    write_log "$job $video_name ERROR: ffmpeg command failed or crashed (attempt $attempt of $max_attempts)"
+                    cleanup_job_folder "$output_path"
+                    attempt=$((attempt + 1))
+                fi
             fi
+        done
+
+        # Check final result
+        if [[ $transcode_success -eq 0 ]]; then
+            write_log "$job $video_name ERROR: All $max_attempts transcode attempts failed"
             write_skip_error "$video_name"
-            # Clean up job folder on failure
-            cleanup_job_folder "$output_path"
             return 1
         fi
     else
