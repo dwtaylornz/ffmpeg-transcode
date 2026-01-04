@@ -29,7 +29,7 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 
 ### Linux (Bash)
 1. Navigate to the `bash` directory
-2. Edit the configuration parameters in `transcode.sh`:
+2. Edit the configuration in `transcode-config.json`:
    - Set your media path
    - Configure minimum video size and age
    - Adjust FFmpeg parameters
@@ -42,7 +42,7 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 ### Windows (PowerShell)
 1. Navigate to the `powershell` directory
 2. Run `get-ffmpeg.ps1` to download the latest FFmpeg binaries
-3. Edit settings in `variables.ps1`
+3. Edit configuration settings in `transcode.ps1`
 4. Run the transcoding script:
    ```powershell
    .\transcode.ps1
@@ -64,24 +64,29 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 ## Project Structure
 
 ```
-├── bash/               # Linux implementation
-│   ├── transcode.sh    # Main bash script
-│   ├── scan_results.csv
-│   ├── skip.txt       # Skip list for processed files
-│   └── transcode.log  # Operation logs
-└── powershell/        # Windows implementation
-    ├── get-ffmpeg.ps1 # FFmpeg download script
-    ├── transcode.ps1  # Main PowerShell script
-    ├── variables.ps1  # Configuration file
-    └── include/       # PowerShell modules and jobs
+├── bash/                          # Linux implementation
+│   ├── README.md                  # Linux-specific documentation
+│   ├── transcode-config.json      # Configuration file
+│   └── transcode.sh               # Main bash script
+└── powershell/                    # Windows implementation
+    ├── README.md                  # Windows-specific documentation
+    ├── get-ffmpeg.ps1            # FFmpeg download script
+    ├── transcode.ps1             # Main PowerShell script
+    └── include/                  # PowerShell modules and jobs
+        ├── functions.psm1        # Common functions module
+        ├── job_health_check.ps1  # Health check job script
+        ├── job_media_scan.ps1    # Media scanning job script
+        └── job_transcode.ps1     # Transcoding job script
 ```
 
 ## Logging and Monitoring
 
-Both implementations maintain detailed logs:
-- Transaction logs in `transcode.log`
-- Skip lists for processed files
+Both implementations maintain detailed logs and tracking:
+- Operation logs for transcode activities
 - Error logs for failed transcodes
+- Progress tracking for ongoing operations
+
+For more detailed information about each platform's implementation, see the platform-specific README files in the `bash/` and `powershell/` directories.
 
 ## Contributing
 

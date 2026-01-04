@@ -32,31 +32,38 @@ A powerful bash script for hardware-accelerated video transcoding using FFmpeg w
 
 ## Configuration
 
+Configuration is managed through the `transcode-config.json` file. Edit this file to customize the following settings:
+
 ### Main Settings
 
-```bash
-# Video processing settings
-MEDIA_PATH="/var/mnt/videos"              # Path to scan for videos
-MIN_VIDEO_SIZE=0                          # Minimum size in MB before quitting
-MIN_VIDEO_AGE=0                           # Minimum age of file to process (days)
-GPU_THREADS=2                             # Number of simultaneous GPU jobs
+```json
+{
+  "MEDIA_PATH": "/var/mnt/videos",        // Path to scan for videos
+  "MIN_VIDEO_SIZE": 0,                    // Minimum size in MB before quitting
+  "MIN_VIDEO_AGE": 0,                     // Minimum age of file to process (days)
+  "GPU_THREADS": 2                        // Number of simultaneous GPU jobs
+}
 ```
 
 ### Transcoding Parameters
 
-```bash
-FFMPEG_TIMEOUT=6000                       # Timeout per job (minutes)
-FFMPEG_MIN_DIFF=10                        # Minimum size reduction percentage
-FFMPEG_MAX_DIFF=99                        # Maximum size reduction percentage
-VIDEO_CODEC_SKIP_LIST="av1"               # Codecs to skip (comma-separated)
-MOVE_FILE=1                               # 1=move files, 0=test mode
+```json
+{
+  "FFMPEG_TIMEOUT": 6000,                 // Timeout per job (minutes)
+  "FFMPEG_MIN_DIFF": 10,                 // Minimum size reduction percentage
+  "FFMPEG_MAX_DIFF": 99,                 // Maximum size reduction percentage
+  "VIDEO_CODEC_SKIP_LIST": "av1",        // Codecs to skip (comma-separated)
+  "MOVE_FILE": 1                         // 1=move files, 0=test mode
+}
 ```
 
 ### Scan Behavior
 
-```bash
-SCAN_AT_START=1                           # 0=background scan, 1=force scan, 2=no scan
-RESTART_QUEUE=720                         # Minutes before queue restart
+```json
+{
+  "SCAN_AT_START": 1,                    // 0=background scan, 1=force scan, 2=no scan
+  "RESTART_QUEUE": 720                   // Minutes before queue restart
+}
 ```
 
 ## Usage
@@ -69,13 +76,18 @@ RESTART_QUEUE=720                         # Minutes before queue restart
 
 ## File Structure
 
-### Generated Files
+### Project Files
 
-- `transcode.log` - Main log file with timestamped entries
-- `scan_results.csv` - CSV file with discovered video files and sizes
-- `skip.txt` - List of successfully processed files
-- `skiperror.txt` - List of files that encountered errors
-- `/dev/shm/ffmpeg-transcode/` - Temporary processing directory
+- `transcode-config.json` - Configuration file for all script settings
+- `transcode.sh` - Main transcoding script
+
+### Runtime Files (Generated During Execution)
+
+- `transcode.log` - Main log file with timestamped entries (created during execution)
+- `scan_results.csv` - CSV file with discovered video files and sizes (created during execution)
+- `skip.txt` - List of successfully processed files (created during execution)
+- `skiperror.txt` - List of files that encountered errors (created during execution)
+- `/dev/shm/ffmpeg-transcode/` - Temporary processing directory (created during execution)
 
 ### Supported Video Formats
 
