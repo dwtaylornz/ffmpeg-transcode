@@ -610,6 +610,11 @@ for video_entry in "${videos[@]}"; do
     # Skip if in skip list - O(1) lookup
     video_basename="$(basename "$video")"
     [[ -n "${skip_lookup[$video_basename]:-}" ]] && continue
+    # Check if file still exists (may have been deleted/moved since scan)
+    if [[ ! -f "$video" ]]; then
+        write_log "[WARN] File no longer exists, skipping: $video_basename"
+        continue
+    fi
     # Check min video size (in MB) - use config-specific minimum
     min_size="${CONFIG_MIN_SIZE[$config_name]}"
     video_size_mb=$(du -m "$video" | awk '{print $1}')
