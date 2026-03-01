@@ -158,14 +158,43 @@ run_media_scan() {
     fi
     : >"$output_csv"
     find "$media_path" -type f \
-        \( -iname '*.mkv' \
+        \( -iname '*.3g2' \
+        -o -iname '*.3gp' \
+        -o -iname '*.asf' \
         -o -iname '*.avi' \
-        -o -iname '*.ts' \
+        -o -iname '*.dav' \
+        -o -iname '*.dirac' \
+        -o -iname '*.drc' \
+        -o -iname '*.flv' \
+        -o -iname '*.gxf' \
+        -o -iname '*.ismv' \
+        -o -iname '*.ivf' \
+        -o -iname '*.m4v' \
+        -o -iname '*.mkv' \
         -o -iname '*.mov' \
-        -o -iname '*.y4m' \
-        -o -iname '*.m2ts' \
+        -o -iname '*.mp2' \
         -o -iname '*.mp4' \
-        -o -iname '*.wmv' \) \
+        -o -iname '*.mpeg' \
+        -o -iname '*.mpegts' \
+        -o -iname '*.mpg' \
+        -o -iname '*.m2ts' \
+        -o -iname '*.mxf' \
+        -o -iname '*.nut' \
+        -o -iname '*.ogg' \
+        -o -iname '*.ogv' \
+        -o -iname '*.ps' \
+        -o -iname '*.rm' \
+        -o -iname '*.roq' \
+        -o -iname '*.swf' \
+        -o -iname '*.ts' \
+        -o -iname '*.vc1' \
+        -o -iname '*.viv' \
+        -o -iname '*.vob' \
+        -o -iname '*.webm' \
+        -o -iname '*.wm' \
+        -o -iname '*.wmv' \
+        -o -iname '*.wtv' \
+        -o -iname '*.y4m' \) \
         -printf '%p,%s\n' | sort -t, -k2 -nr >"$output_csv"
     if [[ $SCAN_AT_START -eq 1 ]]; then
         write_log "Media scan complete, found $(wc -l <"$output_csv") videos in '$config_name'"
