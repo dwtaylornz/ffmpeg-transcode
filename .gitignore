@@ -6,3 +6,6 @@ output
 .vscode/launch.json
 variables*.ps1
 variables.ps1
+.env
+.claude/settings.json
+bash/transcode-config.json
