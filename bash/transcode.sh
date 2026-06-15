@@ -20,6 +20,14 @@ check_dependencies() {
         echo "ERROR: jq is required but not installed. Please install jq to continue."
         exit 1
     fi
+    if ! command -v ffmpeg &> /dev/null; then
+        echo "ERROR: ffmpeg is required but not installed. Please install ffmpeg to continue."
+        exit 1
+    fi
+    if ! command -v ffprobe &> /dev/null; then
+        echo "ERROR: ffprobe is required but not installed. Please install ffprobe to continue."
+        exit 1
+    fi
 }
 
 get_vcn_utilization() {
@@ -71,6 +79,16 @@ load_config() {
         CONFIG_FFMPEG_PARAMS["$cfg_name"]="$ffmpeg_params"
         CONFIG_SKIP_LIST["$cfg_name"]="$skip_list"
     done < <(jq -r '.configurations[] | [.name, .media_path, .min_video_size, .min_video_age, .ffmpeg_output_params, .video_codec_skip_list] | @tsv' "$config_file")
+
+    # Initialize tunables from config so that JSON overrides take effect.
+    # These were previously hardcoded; reading them here means a user
+    # changing the JSON file actually changes behavior.
+    FFMPEG_MIN_DIFF=${CONFIG_GLOBAL["ffmpeg_min_diff"]:-10}
+    FFMPEG_MAX_DIFF=${CONFIG_GLOBAL["ffmpeg_max_diff"]:-95}
+    FFMPEG_NICE_PRIORITY=${CONFIG_GLOBAL["ffmpeg_nice_priority"]:--20}
+    DURATION_TOLERANCE=${CONFIG_GLOBAL["duration_tolerance"]:-30}
+    SLEEP_BEFORE_MOVE=${CONFIG_GLOBAL["sleep_before_move"]:-2}
+    SLEEP_AFTER_MOVE=${CONFIG_GLOBAL["sleep_after_move"]:-2}
 }
 
 write_log() {
@@ -392,11 +410,7 @@ post_transcode_checks() {
     local video_size_mb="$7"
     local job="$8"
     local start_time="$9"
-    local move_file="$MOVE_FILE"
-    local ffmpeg_min_diff="$FFMPEG_MIN_DIFF"
-    local ffmpeg_max_diff="$FFMPEG_MAX_DIFF"
-    local DURATION_TOLERANCE=60
-    
+
     if [[ ! -f "$output_path" ]]; then
         write_log "$job $video_name ERROR - output not found"
         write_skip_error "$video_name" "output-not-found"
@@ -465,14 +479,14 @@ post_transcode_checks() {
         cleanup_job_folder "$output_path"
         return 1
     fi
-    if [[ $diff_percent -lt $ffmpeg_min_diff ]]; then
-        write_log "$job $video_name ERROR, min difference too small (${diff_percent}% < ${ffmpeg_min_diff}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
+    if [[ $diff_percent -lt $FFMPEG_MIN_DIFF ]]; then
+        write_log "$job $video_name ERROR, min difference too small (${diff_percent}% < ${FFMPEG_MIN_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
         write_skip_error "$video_name" "below-min-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi
-    if [[ $diff_percent -gt $ffmpeg_max_diff ]]; then
-        write_log "$job $video_name ERROR, max too high (${diff_percent}% > ${ffmpeg_max_diff}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
+    if [[ $diff_percent -gt $FFMPEG_MAX_DIFF ]]; then
+        write_log "$job $video_name ERROR, max too high (${diff_percent}% > ${FFMPEG_MAX_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
         write_skip_error "$video_name" "above-max-reduction"
         cleanup_job_folder "$output_path"
         return 1
@@ -487,7 +501,7 @@ post_transcode_checks() {
     if [[ $time_taken -gt 0 ]]; then
         gb_per_minute=$(awk "BEGIN {printf \"%.2f\", $video_size_mb/1024/($time_taken/$MINUTES_TO_SECONDS)}")
     fi
-    if [[ $move_file -eq 0 ]]; then
+    if [[ $MOVE_FILE -eq 0 ]]; then
         write_log "$job $video_name Transcode time: $total_time_formatted, Saved: ${diff_mb}MB (${video_size_mb}MB -> ${video_new_size_mb}MB) or ${diff_percent}%"
         write_log "$job $video_name video codec $video_codec -> $video_new_videocodec, audio codec $audio_codec -> $video_new_audiocodec"
         write_log "$job $video_name SUCCESS, move file disabled, File NOT moved"
@@ -527,16 +541,11 @@ FFMPEG_TIMEOUT=${CONFIG_GLOBAL["ffmpeg_timeout"]:-3600}
 RESTART_QUEUE=${CONFIG_GLOBAL["restart_queue"]:-720}
 DAYS_TO_SECONDS=86400
 MINUTES_TO_SECONDS=60
-DURATION_TOLERANCE=30
-FFMPEG_NICE_PRIORITY=-20
+# DURATION_TOLERANCE, FFMPEG_MIN_DIFF, FFMPEG_MAX_DIFF, FFMPEG_NICE_PRIORITY,
+# SLEEP_BEFORE_MOVE, SLEEP_AFTER_MOVE are set in load_config from JSON.
 SCAN_AT_START=${CONFIG_GLOBAL["scan_at_start"]:-0}
-SKIP_FILE_DEFAULT_NAME="${CONFIG_GLOBAL["skip_file"]:-./skip.csv}"
-SKIP_FILE="$SKIP_FILE_DEFAULT_NAME"
+SKIP_FILE=${CONFIG_GLOBAL["skip_file"]:-"./skip.csv"}
 MOVE_FILE=${CONFIG_GLOBAL["move_file"]:-0}
-SLEEP_BEFORE_MOVE=2
-SLEEP_AFTER_MOVE=2
-FFMPEG_MIN_DIFF=10
-FFMPEG_MAX_DIFF=95
 
 initialize_output_folder
 show_state
