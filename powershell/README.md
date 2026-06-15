@@ -25,7 +25,7 @@ A Windows PowerShell script to re-encode media library videos using FFmpeg with 
 ## Usage
 
 1. Run `get-ffmpeg.ps1` to download FFmpeg binaries (if not already present)
-2. Edit configuration settings in `transcode.ps1`:
+2. Create a `variables.ps1` file in the same directory and set your configuration:
    - Set your media path
    - Configure minimum file size and age
    - Adjust FFmpeg parameters
@@ -56,6 +56,7 @@ Configuration settings are located in `transcode.ps1`. Key settings include:
 ├── README.md                  # This file
 ├── get-ffmpeg.ps1            # FFmpeg download script
 ├── transcode.ps1             # Main transcoding script
+├── variables.ps1             # User configuration file (create from transcode.ps1 settings)
 └── include/                  # PowerShell modules and jobs
     ├── functions.psm1        # Common functions module
     ├── job_health_check.ps1  # Health check job script

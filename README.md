@@ -5,13 +5,16 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 ## Features
 
 - Automated scanning and transcoding of media libraries
-- Hardware-accelerated video encoding support
-- Background scanning and parallel transcoding
+- Hardware-accelerated video encoding support (VAAPI on Linux, GPU offload on Windows)
+- Background scanning and parallel transcoding with configurable job counts
+- Multiple media path configurations (Linux)
+- Automatic GPU utilization monitoring and dynamic thread ramping (Linux)
 - Configurable encoding parameters and quality settings
-- Extensive error checking and validation
+- Extensive error checking and validation (duration, size, codec, stream)
 - Detailed logging of transcode operations
-- Skip lists for already optimized files
+- Persistent skip lists for already optimized and errored files
 - File age and size filtering
+- Timeout handling for stuck transcoding jobs
 
 ## Requirements
 
@@ -29,12 +32,16 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 
 ### Linux (Bash)
 1. Navigate to the `bash` directory
-2. Edit the configuration in `transcode-config.json`:
-   - Set your media path
+2. Copy the example configuration and edit it:
+   ```bash
+   cp transcode-config.json.example transcode-config.json
+   ```
+3. Edit the configuration in `transcode-config.json`:
+   - Set your media paths under `configurations`
    - Configure minimum video size and age
-   - Adjust FFmpeg parameters
-   - Set number of parallel transcoding threads
-3. Run the script:
+   - Adjust FFmpeg output parameters
+   - Set minimum/maximum GPU threads and GPU utilization target
+4. Run the script:
    ```bash
    ./transcode.sh
    ```
@@ -42,7 +49,7 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 ### Windows (PowerShell)
 1. Navigate to the `powershell` directory
 2. Run `get-ffmpeg.ps1` to download the latest FFmpeg binaries
-3. Edit configuration settings in `transcode.ps1`
+3. Create and edit configuration settings in `variables.ps1` (use `transcode.ps1` as a reference)
 4. Run the transcoding script:
    ```powershell
    .\transcode.ps1
@@ -64,19 +71,21 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 ## Project Structure
 
 ```
-├── bash/                          # Linux implementation
-│   ├── README.md                  # Linux-specific documentation
-│   ├── transcode-config.json      # Configuration file
-│   └── transcode.sh               # Main bash script
-└── powershell/                    # Windows implementation
-    ├── README.md                  # Windows-specific documentation
-    ├── get-ffmpeg.ps1            # FFmpeg download script
-    ├── transcode.ps1             # Main PowerShell script
-    └── include/                  # PowerShell modules and jobs
-        ├── functions.psm1        # Common functions module
-        ├── job_health_check.ps1  # Health check job script
-        ├── job_media_scan.ps1    # Media scanning job script
-        └── job_transcode.ps1     # Transcoding job script
+├── bash/                                           # Linux implementation
+│   ├── README.md                                   # Linux-specific documentation
+│   ├── transcode-config.json.example               # Example configuration file
+│   └── transcode.sh                                # Main bash script
+├── powershell/                                     # Windows implementation
+│   ├── README.md                                   # Windows-specific documentation
+│   ├── get-ffmpeg.ps1                              # FFmpeg download script
+│   ├── transcode.ps1                               # Main PowerShell script and configuration
+│   └── include/                                    # PowerShell modules and jobs
+│       ├── functions.psm1                          # Common functions module
+│       ├── job_health_check.ps1                    # Health check job script
+│       ├── job_media_scan.ps1                      # Media scanning job script
+│       └── job_transcode.ps1                       # Transcoding job script
+├── .gitignore                                      # Git ignore rules
+└── README.md                                       # This file
 ```
 
 ## Logging and Monitoring

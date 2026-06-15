@@ -6,8 +6,9 @@ A powerful bash script for hardware-accelerated video transcoding using FFmpeg w
 
 ### Core Functionality
 - **Hardware-Accelerated Encoding**: Uses VAAPI (Video Acceleration API) for efficient AV1 encoding
-- **Multi-Threading**: Configurable number of simultaneous GPU encoding jobs
+- **Dynamic Multi-Threading**: Configurable minimum/maximum simultaneous GPU jobs with automatic ramping based on GPU utilization
 - **Batch Processing**: Automatically scans directories and processes multiple video files
+- **Multiple Media Paths**: Supports separate configurations for different media libraries
 - **Smart Skip Lists**: Maintains lists of processed and errored files to avoid reprocessing
 
 ### Quality Control
@@ -32,37 +33,40 @@ A powerful bash script for hardware-accelerated video transcoding using FFmpeg w
 
 ## Configuration
 
-Configuration is managed through the `transcode-config.json` file. Edit this file to customize the following settings:
+Configuration is managed through the `transcode-config.json` file. Copy `transcode-config.json.example` to `transcode-config.json` and edit it to customize the following settings:
 
-### Main Settings
+### Global Settings
 
 ```json
 {
-  "MEDIA_PATH": "/var/mnt/videos",        // Path to scan for videos
-  "MIN_VIDEO_SIZE": 0,                    // Minimum size in MB before quitting
-  "MIN_VIDEO_AGE": 0,                     // Minimum age of file to process (days)
-  "GPU_THREADS": 2                        // Number of simultaneous GPU jobs
+  "min_threads": 2,                       // Minimum simultaneous GPU jobs
+  "max_threads": 8,                       // Maximum simultaneous GPU jobs
+  "gpu_target_pct": 95,                   // Target GPU utilization before adding threads
+  "gpu_ramp_wait": 30,                    // Seconds to wait for GPU utilization to ramp
+  "gpu_check_interval": 30,               // Seconds between GPU utilization checks
+  "scan_at_start": 1,                     // 0=background scan, 1=force scan, 2=no scan
+  "restart_queue": 720,                   // Minutes before queue restart
+  "ffmpeg_timeout": 6000,                 // Timeout per job (minutes)
+  "ffmpeg_min_diff": 5,                   // Minimum size reduction percentage
+  "ffmpeg_max_diff": 95,                  // Maximum size reduction percentage
+  "move_file": 1                          // 1=move files, 0=test mode
 }
 ```
 
-### Transcoding Parameters
+### Per-Path Configurations
 
 ```json
 {
-  "FFMPEG_TIMEOUT": 6000,                 // Timeout per job (minutes)
-  "FFMPEG_MIN_DIFF": 10,                 // Minimum size reduction percentage
-  "FFMPEG_MAX_DIFF": 99,                 // Maximum size reduction percentage
-  "VIDEO_CODEC_SKIP_LIST": "av1",        // Codecs to skip (comma-separated)
-  "MOVE_FILE": 1                         // 1=move files, 0=test mode
-}
-```
-
-### Scan Behavior
-
-```json
-{
-  "SCAN_AT_START": 1,                    // 0=background scan, 1=force scan, 2=no scan
-  "RESTART_QUEUE": 720                   // Minutes before queue restart
+  "configurations": [
+    {
+      "name": "movies",
+      "media_path": "/videos/movies",
+      "min_video_size": 0,
+      "min_video_age": 10,
+      "ffmpeg_output_params": "-vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy -b:v 5M -maxrate 10M -bufsize 10M -max_muxing_queue_size 9999",
+      "video_codec_skip_list": "av1"
+    }
+  ]
 }
 ```
 
@@ -78,7 +82,7 @@ Configuration is managed through the `transcode-config.json` file. Edit this fil
 
 ### Project Files
 
-- `transcode-config.json` - Configuration file for all script settings
+- `transcode-config.json` - Configuration file for all script settings (copy from `transcode-config.json.example`)
 - `transcode.sh` - Main transcoding script
 
 ### Runtime Files (Generated During Execution)
