@@ -16,6 +16,7 @@ A powerful bash script for hardware-accelerated video transcoding using FFmpeg w
 - **Size Validation**: Configurable minimum/maximum file size reduction percentages
 - **Codec Verification**: Validates video and audio streams in output files
 - **Real-time Monitoring**: Monitors output file size during transcoding to prevent oversized outputs
+- **25% Early-Abort**: Stops a transcode early when 25% of playback time has produced output already larger than 25% of the original file size, avoiding wasted encoding time on inefficient sources
 
 ### Management Features
 - **Automatic Queue Restart**: Rescans directories and restarts queue after configurable time
@@ -122,8 +123,27 @@ Configuration is managed through the `transcode-config.json` file. Copy `transco
 - Applies format conversion (nv12) and hardware upload
 - Configures bitrate (3M), maxrate (5M), and buffer size (5M)
 - Monitors output size in real-time
+- Tracks FFmpeg `-progress` output to detect elapsed playback time and output bytes
 
-### 4. Post-Processing Validation
+### 4. 25% Early-Abort Check
+
+During transcoding the monitor thread reads the FFmpeg `-progress` stream every 5 seconds. It extracts:
+- `out_time_us` / `out_time_ms` — elapsed playback time in microseconds
+- `total_size` — current output file size in bytes
+
+When the encode has reached **25% of the original duration** (`video_duration / 4`) **and** the current output size has reached **25% of the original file size** (`original_size_bytes / 4`), the monitor concludes that the resulting file is unlikely to be smaller than the source and aborts the encode early.
+
+What happens on early abort:
+1. A warning is logged, e.g. `Reached 25% playback (XXs) with output YYMB >= 25% threshold (ZZMB), aborting transcode early`
+2. FFmpeg is sent `SIGTERM` and allowed up to 5 seconds to exit cleanly.
+3. If still running, it is killed with `SIGKILL`.
+4. `abort_early_cleanup` removes the partial output and temporary files.
+5. The source file is not modified.
+6. The file is added to `skiperror.txt` with reason `early-abort-size-inefficient` so it will be skipped in future runs.
+
+This midpoint check complements the existing post-transcode size validation; it prevents the script from wasting time encoding the full duration of files that are clearly not going to yield useful space savings.
+
+### 5. Post-Processing Validation
 - Verifies output file exists and has non-zero size
 - Checks duration matches original (±10 seconds)
 - Validates video and audio streams
@@ -140,6 +160,8 @@ Configuration is managed through the `transcode-config.json` file. Copy `transco
 
 ### Process Monitoring
 - Real-time size monitoring during transcoding
+- FFmpeg `-progress` parsing for elapsed time and processed frames
+- 25% early-abort when output size is already >= 25% of original at 25% playback
 - Automatic timeout handling for stuck jobs
 - Process priority management (nice level 15)
 - Background process cleanup
@@ -154,6 +176,7 @@ Configuration is managed through the `transcode-config.json` file. Copy `transco
 
 ### Common Error Scenarios
 - Output file larger than original
+- Early abort at 25% because output is already proportionally too large
 - Incorrect duration in transcoded file
 - Missing video/audio streams
 - Insufficient size reduction
