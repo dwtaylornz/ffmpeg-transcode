@@ -1,0 +1,41 @@
+{
+    "global_settings": {
+        "min_threads": 1,
+        "max_threads": 1,
+        "gpu_target_pct": 95,
+        "gpu_ramp_wait": 10,
+        "gpu_check_interval": 10,
+        "vcn_sample_interval": 5,
+        "ffmpeg_input_params": "-err_detect ignore_err -ignore_unknown -vaapi_device /dev/dri/renderD128",
+        "scan_at_start": 1,
+        "restart_queue": 0,
+        "ffmpeg_timeout": 6000,
+        "ffmpeg_logging": "error",
+        "ffmpeg_min_diff": 0,
+        "ffmpeg_max_diff": 95,
+        "move_file": 0,
+        "duration_tolerance": 30,
+        "ffmpeg_nice_priority": 15,
+        "skip_file": "./test-skip.csv",
+        "sleep_before_move": 1,
+        "sleep_after_move": 1,
+        "output_path": "/dev/shm/ffmpeg-transcode",
+        "colors": {
+            "red": "\u001b[1;91m",
+            "orange": "\u001b[0;33m",
+            "yellow": "\u001b[1;93m",
+            "green": "\u001b[1;92m",
+            "reset": "\u001b[0m"
+        }
+    },
+    "configurations": [
+        {
+            "name": "test",
+            "media_path": "/tmp/transcode-test-src",
+            "min_video_size": 0,
+            "min_video_age": 0,
+            "ffmpeg_output_params": "-vf 'format=nv12,hwupload' -c:v av1_vaapi -c:a copy -b:v 2M -maxrate 2M -bufsize 2M -max_muxing_queue_size 9999",
+            "video_codec_skip_list": "av1"
+        }
+    ]
+}
