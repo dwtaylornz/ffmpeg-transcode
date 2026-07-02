@@ -6,12 +6,17 @@ set -euo pipefail
 # ============================================================================
 # CONFIGURATION & ARGUMENTS
 # ============================================================================
-# Colors
-COLOR_RED="\033[1;91m"
-COLOR_ORANGE="\033[0;33m"
-COLOR_YELLOW="\033[1;93m"
-COLOR_GREEN="\033[1;92m"
-COLOR_RESET="\033[0m"
+# Colors (overridden by config JSON in load_config)
+# COLOR_RED, COLOR_ORANGE, COLOR_YELLOW, COLOR_GREEN, COLOR_RESET
+
+# Supported video extensions for media scanning
+VIDEO_EXTENSIONS=(
+    '*.3g2' '*.3gp' '*.asf' '*.avi' '*.dav' '*.dirac' '*.drc' '*.flv'
+    '*.gxf' '*.ismv' '*.ivf' '*.m4v' '*.mkv' '*.mov' '*.mp2' '*.mp4'
+    '*.mpeg' '*.mpegts' '*.mpg' '*.m2ts' '*.mxf' '*.nut' '*.ogg' '*.ogv'
+    '*.ps' '*.rm' '*.roq' '*.swf' '*.ts' '*.vc1' '*.viv' '*.vob' '*.webm'
+    '*.wm' '*.wmv' '*.wtv' '*.y4m'
+)
 
 # UTILITY FUNCTIONS
 # ============================================================================
@@ -64,9 +69,10 @@ load_config() {
         CONFIG_GLOBAL["$key"]="$value"
     done < <(jq -r '.global_settings | to_entries | .[] | select(.value | type != "object") | "\(.key)\t\(.value)"' "$config_file")
 
-    # Load colors specifically
+    # Load colors specifically and export as standalone variables
     while IFS=$'\t' read -r key value; do
         CONFIG_GLOBAL["COLOR_$key"]="$value"
+        declare -g "COLOR_${key^^}=$value"
     done < <(jq -r '.global_settings.colors | to_entries | .[] | "\(.key)\t\(.value)"' "$config_file")
 
     # Load configurations
@@ -123,10 +129,6 @@ write_skip() {
         printf '%s,%s\n' "$video_name" "$reason" >>"$SKIP_FILE"
         skip_lookup["$video_name"]="$reason"
     fi
-}
-
-write_skip_error() {
-    write_skip "$1" "$2"
 }
 
 initialize_output_folder() {
@@ -241,6 +243,23 @@ get_media_info() {
     ffprobe -v quiet -print_format json -show_streams -show_format "$video_path"
 }
 
+# Extract key metadata from ffprobe JSON output.
+# Returns space-separated: video_codec audio_codec audio_channels video_width duration_float duration_tag audio_stream_count
+detect_media_metadata() {
+    local media_info_json="$1"
+    echo "$media_info_json" | jq -r '
+        [
+            ([.streams[] | select(.codec_type=="video") | .codec_name] | first) // "null",
+            ([.streams[] | select(.codec_type=="audio") | .codec_name] | first) // "null",
+            ([.streams[] | select(.codec_type=="audio") | .channels] | first) // 0,
+            ([.streams[] | select(.codec_type=="video") | .width] | first) // 0,
+            (.format.duration) // 0,
+            ([.streams[] | select(.codec_type=="video") | .tags.DURATION] | first) // "null",
+            ([.streams[] | select(.codec_type=="audio")] | length)
+        ] | map(tostring) | join(" ")
+    '
+}
+
 show_state() {
     local skipped_count skippederror_count skiptotal_count
     skipped_count=$(grep -c ',transcoded\|,codec-skip' "$SKIP_FILE" 2>/dev/null || true)
@@ -276,8 +295,14 @@ run_media_scan() {
         write_log "[INFO] Running media scan for config '$config_name' at $media_path"
     fi
     : >"$output_csv"
+    # Build find arguments from VIDEO_EXTENSIONS array with -o separators
+    local find_args=()
+    for ext in "${VIDEO_EXTENSIONS[@]}"; do
+        [[ ${#find_args[@]} -gt 0 ]] && find_args+=( '-o' )
+        find_args+=( '-iname' "$ext" )
+    done
     find "$media_path" -type f \
-        \( -iname '*.3g2' -o -iname '*.3gp' -o -iname '*.asf' -o -iname '*.avi' -o -iname '*.dav' -o -iname '*.dirac' -o -iname '*.drc' -o -iname '*.flv' -o -iname '*.gxf' -o -iname '*.ismv' -o -iname '*.ivf' -o -iname '*.m4v' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.mp2' -o -iname '*.mp4' -o -iname '*.mpeg' -o -iname '*.mpegts' -o -iname '*.mpg' -o -iname '*.m2ts' -o -iname '*.mxf' -o -iname '*.nut' -o -iname '*.ogg' -o -iname '*.ogv' -o -iname '*.ps' -o -iname '*.rm' -o -iname '*.roq' -o -iname '*.swf' -o -iname '*.ts' -o -iname '*.vc1' -o -iname '*.viv' -o -iname '*.vob' -o -iname '*.webm' -o -iname '*.wm' -o -iname '*.wmv' -o -iname '*.wtv' -o -iname '*.y4m' \) \
+        \( "${find_args[@]}" \) \
         -printf '%p,%s\n' | sort -t, -k2 -nr >"$output_csv"
     if [[ $SCAN_AT_START -eq 1 ]]; then
         write_log "Media scan complete, found $(wc -l <"$output_csv") videos in '$config_name'"
@@ -328,19 +353,8 @@ run_job_transcode() {
     local media_info_json
     media_info_json=$(get_media_info "$video_path")
     local video_codec audio_codec audio_channels video_width video_duration_float video_duration_tag audio_stream_count
-    local _meta
-    _meta=$(echo "$media_info_json" | jq -r '
-        [
-            ([.streams[] | select(.codec_type=="video") | .codec_name] | first) // "null",
-            ([.streams[] | select(.codec_type=="audio") | .codec_name] | first) // "null",
-            ([.streams[] | select(.codec_type=="audio") | .channels] | first) // 0,
-            ([.streams[] | select(.codec_type=="video") | .width] | first) // 0,
-            (.format.duration) // 0,
-            ([.streams[] | select(.codec_type=="video") | .tags.DURATION] | first) // "null",
-            ([.streams[] | select(.codec_type=="audio")] | length)
-        ] | map(tostring) | join(" ")
-    ')
-    read -r video_codec audio_codec audio_channels video_width video_duration_float video_duration_tag audio_stream_count <<< "$_meta"
+    local media_meta
+    read -r video_codec audio_codec audio_channels video_width video_duration_float video_duration_tag audio_stream_count <<< "$(detect_media_metadata "$media_info_json")"
     local video_duration=${video_duration_float%.*}
     if [[ "$video_duration_tag" != "null" && "$video_duration_tag" =~ ^([0-9]+):([0-9]+):([0-9]+) ]]; then
         local tag_duration=$(( 10#${BASH_REMATCH[1]}*3600 + 10#${BASH_REMATCH[2]}*60 + 10#${BASH_REMATCH[3]} ))
@@ -350,7 +364,7 @@ run_job_transcode() {
     video_age=$(get_video_age "$video_path")
     if [[ "${audio_stream_count:-0}" -eq 0 ]]; then
         write_log "$job $video_name ERROR: no audio streams detected, deleting source file"
-        write_skip_error "$video_name" "no-audio-source"
+        write_skip "$video_name" "no-audio-source"
         rm -f "$video_path"
         return 1
     fi
@@ -434,7 +448,7 @@ run_job_transcode() {
         # artifacts and returned a distinct exit code. Log the outcome, mark the
         # file as skipped, and return the abort code to the caller.
         write_log "$job $video_name INFO: transcode aborted early by monitor due to size inefficiency"
-        write_skip_error "$video_name" "early-abort-size-inefficient"
+        write_skip "$video_name" "early-abort-size-inefficient"
         return 2
     elif [[ $ffmpeg_exit -eq 0 ]]; then
         kill "$monitor_pid" 2>/dev/null || true
@@ -463,18 +477,18 @@ run_job_transcode() {
             case "$monitor_flag_content" in
                 early-abort-10pct|output-too-large)
                     write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original or early abort)"
-                    write_skip_error "$video_name" "killed-by-monitor"
+                    write_skip "$video_name" "killed-by-monitor"
                     ;;
                 *)
                     write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original)"
-                    write_skip_error "$video_name" "killed-by-monitor"
+                    write_skip "$video_name" "killed-by-monitor"
                     ;;
             esac
             cleanup_job_folder "$output_path"
             return 1
         else
             write_log "$job $video_name ERROR: ffmpeg failed (exit ${ffmpeg_exit})${ffmpeg_err_detail}"
-            write_skip_error "$video_name" "ffmpeg-crash-${ffmpeg_exit}"
+            write_skip "$video_name" "ffmpeg-crash-${ffmpeg_exit}"
             cleanup_job_folder "$output_path"
             return 1
         fi
@@ -637,7 +651,7 @@ post_transcode_checks() {
 
     if [[ ! -f "$output_path" ]]; then
         write_log "$job $video_name ERROR - output not found"
-        write_skip_error "$video_name" "output-not-found"
+        write_skip "$video_name" "output-not-found"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -645,26 +659,15 @@ post_transcode_checks() {
     video_new_size_mb=$(du -m "$output_path" | awk '{print $1}')
     if [[ $video_new_size_mb -eq 0 ]]; then
         write_log "$job $video_name ERROR, zero file size (${video_new_size_mb}MB), File NOT moved"
-        write_skip_error "$video_name" "zero-size"
+        write_skip "$video_name" "zero-size"
         cleanup_job_folder "$output_path"
         return 1
     fi
     local new_media_info_json
     new_media_info_json=$(get_media_info "$output_path")
     local video_new_videocodec video_new_audiocodec video_new_channels video_new_width video_new_duration_float video_new_duration_tag video_new_audio_count
-    local _new_meta
-    _new_meta=$(echo "$new_media_info_json" | jq -r '
-        [
-            ([.streams[] | select(.codec_type=="video") | .codec_name] | first) // "null",
-            ([.streams[] | select(.codec_type=="audio") | .codec_name] | first) // "null",
-            ([.streams[] | select(.codec_type=="audio") | .channels] | first) // 0,
-            ([.streams[] | select(.codec_type=="video") | .width] | first) // 0,
-            (.format.duration) // 0,
-            ([.streams[] | select(.codec_type=="video") | .tags.DURATION] | first) // "null",
-            ([.streams[] | select(.codec_type=="audio")] | length)
-        ] | map(tostring) | join(" ")
-    ')
-    read -r video_new_videocodec video_new_audiocodec video_new_channels video_new_width video_new_duration_float video_new_duration_tag video_new_audio_count <<< "$_new_meta"
+    local output_meta
+    read -r video_new_videocodec video_new_audiocodec video_new_channels video_new_width video_new_duration_float video_new_duration_tag video_new_audio_count <<< "$(detect_media_metadata "$new_media_info_json")"
     local video_new_duration=${video_new_duration_float%.*}
     if [[ "$video_new_duration_tag" != "null" && "$video_new_duration_tag" =~ ^([0-9]+):([0-9]+):([0-9]+) ]]; then
         local new_tag_duration=$(( 10#${BASH_REMATCH[1]}*3600 + 10#${BASH_REMATCH[2]}*60 + 10#${BASH_REMATCH[3]} ))
@@ -672,19 +675,19 @@ post_transcode_checks() {
     fi
     if [[ -z "$video_new_duration" || "$video_new_duration" -eq 0 || $video_new_duration -lt $((video_duration - DURATION_TOLERANCE)) || $video_new_duration -gt $((video_duration + DURATION_TOLERANCE)) ]]; then
         write_log "$job $video_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved"
-        write_skip_error "$video_name" "duration-mismatch"
+        write_skip "$video_name" "duration-mismatch"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ -z "$video_new_videocodec" || "$video_new_videocodec" == "null" ]]; then
         write_log "$job $video_name ERROR, no video stream detected, File NOT moved"
-        write_skip_error "$video_name" "no-video-stream"
+        write_skip "$video_name" "no-video-stream"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ -z "$video_new_audiocodec" || "$video_new_audiocodec" == "null" ]]; then
         write_log "$job $video_name ERROR, no audio stream detected, File NOT moved"
-        write_skip_error "$video_name" "no-audio-stream"
+        write_skip "$video_name" "no-audio-stream"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -699,19 +702,19 @@ post_transcode_checks() {
     local max_size_limit=$((video_size_mb + 500))
     if [[ $video_new_size_mb -gt $max_size_limit ]]; then
         write_log "$job $video_name ERROR, output significantly larger than original (${video_size_mb}MB -> ${video_new_size_mb}MB), File NOT moved"
-        write_skip_error "$video_name" "output-too-large"
+        write_skip "$video_name" "output-too-large"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ $diff_percent -lt $FFMPEG_MIN_DIFF ]]; then
         write_log "$job $video_name ERROR, min difference too small (${diff_percent}% < ${FFMPEG_MIN_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
-        write_skip_error "$video_name" "below-min-reduction"
+        write_skip "$video_name" "below-min-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ $diff_percent -gt $FFMPEG_MAX_DIFF ]]; then
         write_log "$job $video_name ERROR, max too high (${diff_percent}% > ${FFMPEG_MAX_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
-        write_skip_error "$video_name" "above-max-reduction"
+        write_skip "$video_name" "above-max-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -794,6 +797,8 @@ if [[ $need_scan -eq 1 ]]; then
     merge_scan_results "$SCAN_RESULTS"
 elif [[ -f "$SCAN_RESULTS" ]] && [[ $(wc -l <"$SCAN_RESULTS") -gt 0 ]]; then
     # Only run scans in background if scan_results.csv exists and has at least 1 line
+    # Export functions so they're available in the subshell created by (...)
+    export -f run_media_scan merge_scan_results
     (for config_name in "${CONFIG_NAMES[@]}"; do
         run_media_scan "$config_name"
     done
@@ -891,9 +896,9 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
     pre_codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
         -of default=noprint_wrappers=1:nokey=1 "$video" 2>/dev/null || true)
     video_codec_skip_list="${CONFIG_SKIP_LIST[$config_name]}"
-    IFS=',' read -ra _skiplist <<<"$video_codec_skip_list"
-    for _skip in "${_skiplist[@]}"; do
-        if [[ "$pre_codec" == "$_skip" ]]; then
+    IFS=',' read -ra skip_codecs <<<"$video_codec_skip_list"
+    for skip_codec in "${skip_codecs[@]}"; do
+        if [[ "$pre_codec" == "$skip_codec" ]]; then
             write_log "($((video_idx+1))) $video_basename (${video_size_mb}MB, $pre_codec) in video codec skip list, skipping"
             write_skip "$video_basename" "codec-skip"
             skip_lookup["$video_basename"]="codec-skip"
@@ -1117,5 +1122,4 @@ done
 rm -f "$SKIP_FILE"
 write_log "Removed skip files - next run will process all files"
 write_log "Finished processing"
-sleep 120
 exit 0
