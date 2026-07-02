@@ -11,7 +11,7 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 - Automatic GPU utilization monitoring and dynamic thread ramping (Linux)
 - Configurable encoding parameters and quality settings
 - Extensive error checking and validation (duration, size, codec, stream)
-- **Early size-efficiency abort at 25% playback (Linux)** — stops a transcode early if the output is already larger than 25% of the original file size at 25% of the playback time, avoiding wasted encoding time on files that will not shrink enough
+- **Early size-efficiency abort at 10% playback (Linux)** — stops a transcode early if the output is already larger than 10% of the original file size at 10% of the playback time, avoiding wasted encoding time on files that will not shrink enough
 - Detailed logging of transcode operations
 - Persistent skip lists for already optimized and errored files
 - File age and size filtering
@@ -96,9 +96,9 @@ Both implementations maintain detailed logs and tracking:
 - Error logs for failed transcodes
 - Progress tracking for ongoing operations
 
-### Linux 25% Early-Abort Details
+### Linux 10% Early-Abort Details
 
-The Linux script (`bash/transcode.sh`) now parses FFmpeg `-progress` output in real time. While a transcode is running, the monitor compares the encoded output size to the original file size. As soon as the encode reaches **25% of the original playback time** and the output has already reached **25% of the original file size**, it assumes the final encode is unlikely to be smaller than the source and aborts the transcode early. This saves the time that would otherwise be spent encoding the remaining 75% of a file that will not yield useful space savings.
+The Linux script (`bash/transcode.sh`) now parses FFmpeg `-progress` output in real time. While a transcode is running, the monitor compares the encoded output size to the original file size. As soon as the encode reaches **10% of the original playback time** and the output has already reached **10% of the original file size**, it assumes the final encode is unlikely to be smaller than the source and aborts the transcode early. This saves the time that would otherwise be spent encoding the remaining 90% of a file that will not yield useful space savings.
 
 Behavior on early abort:
 - FFmpeg is sent `SIGTERM` and given a short grace period to shut down cleanly.
@@ -107,7 +107,7 @@ Behavior on early abort:
 - The file is recorded in `skiperror.txt` with reason `early-abort-size-inefficient`, so it is skipped on future runs.
 - A warning is written to `transcode.log` showing the size and elapsed time that triggered the abort.
 
-Files already handled by the post-transcode size check (output larger than original at completion) are still caught as before; the 25% check adds a midpoint guard for long encodes.
+Files already handled by the post-transcode size check (output larger than original at completion) are still caught as before; the 10% check adds an earlier guard for long encodes.
 
 For more detailed information about each platform's implementation, see the platform-specific README files in the `bash/` and `powershell/` directories.
 

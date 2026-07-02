@@ -47,7 +47,7 @@ get_vcn_utilization() {
 }
 
 load_config() {
-    local config_file="./transcode-config.json"
+    local config_file="${1:-./transcode-config.json}"
     if [[ ! -f "$config_file" ]]; then
         echo "ERROR: Configuration file '$config_file' not found"
         exit 1
@@ -91,6 +91,11 @@ load_config() {
     SLEEP_AFTER_MOVE=${CONFIG_GLOBAL["sleep_after_move"]:-2}
 }
 
+# Color semantics used by write_log():
+#   red    = ERROR
+#   orange = WARN
+#   yellow = SUCCESS
+#   green  = INFO
 write_log() {
     local log_string="$1"
     local log_file="./transcode.log"
@@ -138,7 +143,86 @@ cleanup_shm() {
     [[ -d "$shm_path" ]] && rm -rf "$shm_path"
 }
 
-trap cleanup_shm EXIT INT TERM HUP
+# Recursively print all descendant PIDs of a given root PID (one per line).
+# The output is deepest-first so that callers can kill children before parents.
+get_descendant_pids() {
+    local parent="$1"
+    local children
+    children=$(pgrep -P "$parent" 2>/dev/null || true)
+    [[ -z "$children" ]] && return
+    local child
+    for child in $children; do
+        get_descendant_pids "$child"
+        echo "$child"
+    done
+}
+
+# Terminate a process and its entire descendant tree.  Children are killed
+# before their parent so the parent cannot respawn them or leave them orphaned.
+# SIGTERM is sent first with a short grace period, then SIGKILL for stragglers.
+kill_tree() {
+    local root="${1:-}"
+    [[ -z "$root" ]] && return
+    [[ "$root" == "$$" ]] && return   # never kill the main script itself
+    if ! kill -0 "$root" 2>/dev/null; then
+        return
+    fi
+    local descendants
+    descendants=$(get_descendant_pids "$root")
+    # SIGTERM every descendant, then the root.
+    local pid
+    for pid in $descendants "$root"; do
+        [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
+    done
+    # Give graceful shutdown a brief window.
+    local waited=0
+    while [[ $waited -lt 10 ]]; do
+        if ! kill -0 "$root" 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    # SIGKILL anything still alive.
+    for pid in $descendants "$root"; do
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
+# Kill every running transcode job (the whole process tree: ffmpeg, monitor,
+# progress sink, and the run_job_transcode subshell), clean up shared memory,
+# clear the slot-tracking variables so the status counter drops to 0, and exit
+# with a code that indicates the abort was intentional.
+abort_handler() {
+    local sig="${1:-INT}"
+    local thread pid_var pid
+    for ((thread = 1; thread <= MAX_THREADS; thread++)); do
+        pid_var="JOB_PID_$thread"
+        pid="${!pid_var:-}"
+        if [[ -n "$pid" ]]; then
+            kill_tree "$pid"
+        fi
+        unset "$pid_var" 2>/dev/null || true
+        unset "JOB_START_$thread" 2>/dev/null || true
+        unset "JOB_SIZE_$thread" 2>/dev/null || true
+    done
+    cleanup_shm
+    # 128 + signal number: SIGINT=2, SIGTERM=15, SIGHUP=1
+    case "$sig" in
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+        HUP) exit 129 ;;
+        *) exit 137 ;;
+    esac
+}
+
+trap 'abort_handler INT' INT
+trap 'abort_handler TERM' TERM
+trap 'abort_handler HUP' HUP
+trap cleanup_shm EXIT
 
 # ============================================================================
 # MEDIA PROCESSING FUNCTIONS
@@ -206,13 +290,17 @@ merge_scan_results() {
     : >"$temp_merged"
     for config_name in "${CONFIG_NAMES[@]}"; do
         local config_csv="./scan_results_${config_name}.csv"
-        if [[ -f "$config_csv" && $(wc -l <"$config_csv") -gt 0 ]]; then
+        if [[ -f "$config_csv" ]] && [[ $(wc -l <"$config_csv") -gt 0 ]]; then
             while IFS=',' read -r video_path size; do
                 echo "$config_name,$video_path,$size" >> "$temp_merged"
             done < "$config_csv"
         fi
     done
-    sort -t, -k3 -nr "$temp_merged" > "$merged_csv"
+    if [[ -s "$temp_merged" ]]; then
+        sort -t, -k3 -nr "$temp_merged" > "$merged_csv"
+    else
+        : > "$merged_csv"
+    fi
     rm -f "$temp_merged"
     local total_videos
     total_videos=$(wc -l <"$merged_csv" 2>/dev/null || echo 0)
@@ -307,9 +395,13 @@ run_job_transcode() {
         $ffmpeg_output_params \
         $audio_codec_override \
         $output_path_q 2>$ffmpeg_err_file_q"
-    # Feed the progress pipe directly from ffmpeg's stdout. Stderr is already
-    # redirected to the error file; stdout becomes the -progress stream.
-    eval "nice -n $FFMPEG_NICE_PRIORITY $ffmpeg_cmd" >"$progress_pipe" &
+    # Launch ffmpeg in a subshell that execs the encoder.  Because the subshell
+    # replaces itself with ffmpeg (via exec), $! is the PID of the actual
+    # encoder process, not an idle bash wrapper.  This makes kill/wait on the
+    # PID reliable and prevents orphaned wrappers from keeping pipe fds open.
+    (
+        eval "exec nice -n $FFMPEG_NICE_PRIORITY $ffmpeg_cmd"
+    ) >"$progress_pipe" &
     local ffmpeg_pid=$!
     monitor_progress "$progress_file" "$scan_size_bytes" "$ffmpeg_pid" "$job" "$video_name" "$video_duration" "$output_path" "$progress_pipe" "$ffmpeg_err_file" &
     local monitor_pid=$!
@@ -322,6 +414,19 @@ run_job_transcode() {
     ffmpeg_exit=${ffmpeg_exit:-0}
     # Close the write side of the FIFO so the sink sees EOF and terminates cleanly.
     rm -f "$progress_pipe"
+    # The sink can block if an orphaned process still holds the write fd, so
+    # guard wait with a short timeout.
+    local sink_done=0
+    for _ in {1..10}; do
+        if ! kill -0 "$progress_sink_pid" 2>/dev/null; then
+            sink_done=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [[ $sink_done -eq 0 ]]; then
+        kill -9 "$progress_sink_pid" 2>/dev/null || true
+    fi
     wait "$progress_sink_pid" 2>/dev/null || true
 
     if [[ $monitor_rc -eq 2 ]]; then
@@ -356,7 +461,7 @@ run_job_transcode() {
         rm -f "$progress_pipe" "$progress_file" "$ffmpeg_err_file" 2>/dev/null || true
         if [[ $monitor_killed_ffmpeg -eq 1 ]]; then
             case "$monitor_flag_content" in
-                early-abort-25pct|output-too-large)
+                early-abort-10pct|output-too-large)
                     write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original or early abort)"
                     write_skip_error "$video_name" "killed-by-monitor"
                     ;;
@@ -396,10 +501,18 @@ abort_early_cleanup() {
     local monitor_flag="$5"
     local ffmpeg_pid="${6:-}"
 
-    # Ensure ffmpeg and any lingering children are gone.
+    # Ensure ffmpeg is gone (safety net when the caller's own kill sequence may
+    # have raced or the PID was reused).  With the exec launch, $ffmpeg_pid is
+    # the real encoder PID, so this is reliable.
     if [[ -n "$ffmpeg_pid" ]] && kill -0 "$ffmpeg_pid" 2>/dev/null; then
         kill -9 "$ffmpeg_pid" 2>/dev/null || true
         wait "$ffmpeg_pid" 2>/dev/null || true
+    fi
+
+    # Close the progress pipe so the sink sees EOF and exits.  This avoids
+    # wait $progress_sink_pid blocking forever on an orphaned ffmpeg write fd.
+    if [[ -n "$progress_pipe" ]] && [[ -p "$progress_pipe" ]]; then
+        rm -f "$progress_pipe"
     fi
 
     # Remove the partially written output and its temporary job folder.
@@ -449,34 +562,38 @@ monitor_progress() {
             elapsed_sec=$((elapsed_us / 1000000))
         fi
 
-        # Early-abort condition: at 25% of playback time the output should be
-        # well under 25% of the original file size. Thresholds:
-        #   quarter_time_us        = video_duration (s) * 1,000,000 / 4
-        #   quarter_size_threshold = original_size_bytes / 4
-        # If both are reached, the encode is unlikely to yield savings, so
-        # terminate ffmpeg gracefully and hand off to the cleanup path.
-        if [[ "$video_duration" -gt 0 && "$original_size_bytes" -gt 0 ]]; then
-            local quarter_time_us=$((video_duration * 1000000 / 4))
-            # Avoid integer-rounding to zero on very small files; require at least one byte.
-            local quarter_size_threshold=$((original_size_bytes / 4))
-            [[ $quarter_size_threshold -lt 1 ]] && quarter_size_threshold=1
-            if [[ "$elapsed_us" =~ ^[0-9]+$ && "$elapsed_us" -ge "$quarter_time_us" && \
-                  "$total_size" =~ ^[0-9]+$ && "$total_size" -ge "$quarter_size_threshold" ]]; then
-                local current_mb=$((total_size / 1024 / 1024))
-                local quarter_mb=$((quarter_size_threshold / 1024 / 1024))
-                write_log "$job $video_name WARN: Reached 25% playback (${elapsed_sec}s) with output ${current_mb}MB >= 25% threshold (${quarter_mb}MB), aborting transcode early"
-                echo "early-abort-25pct" > "$monitor_flag"
-                # SIGTERM asks ffmpeg to shut down cleanly; allow a short grace
-                # period, then force-kill if it is still alive.
-                kill "$ffmpeg_pid" 2>/dev/null || true
-                local grace=0
-                while kill -0 "$ffmpeg_pid" 2>/dev/null && [[ $grace -lt 5 ]]; do
-                    sleep 1
-                    grace=$((grace + 1))
-                done
-                kill -9 "$ffmpeg_pid" 2>/dev/null || true
-                abort_early_cleanup "$output_path" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag"
-                return 2
+        # Early-abort condition: at 10% of playback time the output should be
+        # well under 10% of the original file size. Once past 10%, the
+        # allowable size threshold scales proportionally with playback progress,
+        # e.g., at 12% playback the threshold is 12% of the original size.
+        # This avoids firing at 12% progress while still judging against the
+        # stale 10% size threshold.
+        if [[ "$video_duration" -gt 0 && "$original_size_bytes" -gt 0 && \
+              "$elapsed_us" =~ ^[0-9]+$ ]]; then
+            local tenth_time_us=$((video_duration * 1000000 / 10))
+            if [[ "$elapsed_us" -ge "$tenth_time_us" && \
+                  "$total_size" =~ ^[0-9]+$ ]]; then
+                local pct=$((elapsed_us * 100 / 1000000 / video_duration))
+                local size_threshold=$((original_size_bytes * pct / 100))
+                # Avoid integer-rounding to zero on very small files; require at least one byte.
+                [[ $size_threshold -lt 1 ]] && size_threshold=1
+                if [[ "$total_size" -ge "$size_threshold" ]]; then
+                    local current_mb=$((total_size / 1024 / 1024))
+                    local threshold_mb=$((size_threshold / 1024 / 1024))
+                    write_log "$job $video_name WARN: Reached ${pct}% playback (${elapsed_sec}s) with output ${current_mb}MB >= proportional threshold (${threshold_mb}MB), aborting transcode early"
+                    echo "early-abort-10pct" > "$monitor_flag"
+                    # SIGTERM asks ffmpeg to shut down cleanly; allow a short grace
+                    # period, then force-kill if it is still alive.
+                    kill "$ffmpeg_pid" 2>/dev/null || true
+                    local grace=0
+                    while kill -0 "$ffmpeg_pid" 2>/dev/null && [[ $grace -lt 5 ]]; do
+                        sleep 1
+                        grace=$((grace + 1))
+                    done
+                    kill -9 "$ffmpeg_pid" 2>/dev/null || true
+                    abort_early_cleanup "$output_path" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" "$ffmpeg_pid"
+                    return 2
+                fi
             fi
         fi
 
@@ -488,7 +605,7 @@ monitor_progress() {
                 write_log "$job $video_name WARN: Output ($current_mb MB) significantly exceeds original ($original_mb MB), killing transcode"
                 echo "output-too-large" > "$monitor_flag"
                 kill -9 "$ffmpeg_pid" 2>/dev/null || true
-                abort_early_cleanup "$output_path" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag"
+                abort_early_cleanup "$output_path" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" "$ffmpeg_pid"
                 return 2
             fi
         fi
@@ -629,7 +746,7 @@ post_transcode_checks() {
 # MAIN EXECUTION - INITIALIZATION & CONFIGURATION LOADING
 # ============================================================================
 check_dependencies
-load_config
+load_config "${1:-./transcode-config.json}"
 SKIP_FILE=${CONFIG_GLOBAL["skip_file"]:-"./skip.csv"}
 FFMPEG_VAAPI_DEVICE=${CONFIG_GLOBAL["ffmpeg_vaapi_device"]:-"/dev/dri/renderD128"}
 MIN_THREADS=${CONFIG_GLOBAL["min_threads"]:-1}
@@ -675,7 +792,7 @@ if [[ $need_scan -eq 1 ]]; then
     done
     # Merge the results and sort by size (largest first)
     merge_scan_results "$SCAN_RESULTS"
-elif [[ -f "$SCAN_RESULTS" && $(wc -l <"$SCAN_RESULTS") -gt 0 ]]; then
+elif [[ -f "$SCAN_RESULTS" ]] && [[ $(wc -l <"$SCAN_RESULTS") -gt 0 ]]; then
     # Only run scans in background if scan_results.csv exists and has at least 1 line
     (for config_name in "${CONFIG_NAMES[@]}"; do
         run_media_scan "$config_name"
@@ -797,7 +914,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
             if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
                 if [[ -n "${start_time:-}" ]] && ((( $(date +%s) - start_time ) > FFMPEG_TIMEOUT * MINUTES_TO_SECONDS)); then
                     echo "[WARN] $job_name timed out, killing PID $pid"
-                    kill -9 "$pid" 2>/dev/null || true
+                    kill_tree "$pid"
                     wait "$pid" 2>/dev/null || true
                     unset $pid_var
                     unset $start_var
