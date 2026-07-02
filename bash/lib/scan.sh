@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # scan.sh – media scanning and skip-file management
 
+# Supported video extensions for media scanning. To add a new format,
+# append it here once rather than editing the find expression below.
+VIDEO_EXTENSIONS=(
+    '*.3g2' '*.3gp' '*.asf' '*.avi' '*.dav' '*.dirac' '*.drc' '*.flv'
+    '*.gxf' '*.ismv' '*.ivf' '*.m4v' '*.mkv' '*.mov' '*.mp2' '*.mp4'
+    '*.mpeg' '*.mpegts' '*.mpg' '*.m2ts' '*.mxf' '*.nut' '*.ogg' '*.ogv'
+    '*.ps' '*.rm' '*.roq' '*.swf' '*.ts' '*.vc1' '*.viv' '*.vob' '*.webm'
+    '*.wm' '*.wmv' '*.wtv' '*.y4m'
+)
+
 get_video_age() {
     local video_path="$1"
     local ctime now
@@ -17,8 +27,16 @@ run_media_scan() {
         write_log "[INFO] Running media scan for config '$config_name' at $media_path"
     fi
     : >"$output_csv"
+    # Build find arguments from VIDEO_EXTENSIONS with -o separators so the
+    # extensions combine as OR (multiple -iname without -o would be AND).
+    local find_args=()
+    local ext
+    for ext in "${VIDEO_EXTENSIONS[@]}"; do
+        [[ ${#find_args[@]} -gt 0 ]] && find_args+=( '-o' )
+        find_args+=( '-iname' "$ext" )
+    done
     find "$media_path" -type f \
-        \( -iname '*.3g2' -o -iname '*.3gp' -o -iname '*.asf' -o -iname '*.avi' -o -iname '*.dav' -o -iname '*.dirac' -o -iname '*.drc' -o -iname '*.flv' -o -iname '*.gxf' -o -iname '*.ismv' -o -iname '*.ivf' -o -iname '*.m4v' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.mp2' -o -iname '*.mp4' -o -iname '*.mpeg' -o -iname '*.mpegts' -o -iname '*.mpg' -o -iname '*.m2ts' -o -iname '*.mxf' -o -iname '*.nut' -o -iname '*.ogg' -o -iname '*.ogv' -o -iname '*.ps' -o -iname '*.rm' -o -iname '*.roq' -o -iname '*.swf' -o -iname '*.ts' -o -iname '*.vc1' -o -iname '*.viv' -o -iname '*.vob' -o -iname '*.webm' -o -iname '*.wm' -o -iname '*.wmv' -o -iname '*.wtv' -o -iname '*.y4m' \) \
+        \( "${find_args[@]}" \) \
         -printf '%p,%s\n' | sort -t, -k2 -nr >"$output_csv"
     if [[ $SCAN_AT_START -eq 1 ]]; then
         write_log "Media scan complete, found $(wc -l <"$output_csv") videos in '$config_name'"

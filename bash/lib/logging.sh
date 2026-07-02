@@ -35,10 +35,6 @@ write_skip() {
     fi
 }
 
-write_skip_error() {
-    write_skip "$1" "$2"
-}
-
 show_state() {
     local skipped_count skippederror_count skiptotal_count
     skipped_count=$(grep -c ',transcoded\|,codec-skip' "$SKIP_FILE" 2>/dev/null || true)

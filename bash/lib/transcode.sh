@@ -38,7 +38,7 @@ run_job_transcode() {
 
     if [[ "${audio_stream_count:-0}" -eq 0 ]]; then
         write_log "$job $video_name ERROR: no audio streams detected, deleting source file"
-        write_skip_error "$video_name" "no-audio-source"
+        write_skip "$video_name" "no-audio-source"
         rm -f "$video_path"
         return 1
     fi
@@ -130,7 +130,7 @@ run_job_transcode() {
         # artifacts and returned a distinct exit code. Log the outcome, mark the
         # file as skipped, and return the abort code to the caller.
         write_log "$job $video_name INFO: transcode aborted early by monitor due to size inefficiency"
-        write_skip_error "$video_name" "early-abort-size-inefficient"
+        write_skip "$video_name" "early-abort-size-inefficient"
         return 2
     elif [[ $ffmpeg_exit -eq 0 ]]; then
         kill "$monitor_pid" 2>/dev/null || true
@@ -157,12 +157,12 @@ run_job_transcode() {
         rm -f "$progress_pipe" "$progress_file" "$ffmpeg_err_file" 2>/dev/null || true
         if [[ $monitor_killed_ffmpeg -eq 1 ]]; then
             write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original or early abort)"
-            write_skip_error "$video_name" "killed-by-monitor"
+            write_skip "$video_name" "killed-by-monitor"
             cleanup_job_folder "$output_path"
             return 1
         else
             write_log "$job $video_name ERROR: ffmpeg failed (exit ${ffmpeg_exit})${ffmpeg_err_detail}"
-            write_skip_error "$video_name" "ffmpeg-crash-${ffmpeg_exit}"
+            write_skip "$video_name" "ffmpeg-crash-${ffmpeg_exit}"
             cleanup_job_folder "$output_path"
             return 1
         fi
@@ -295,7 +295,7 @@ post_transcode_checks() {
 
     if [[ ! -f "$output_path" ]]; then
         write_log "$job $video_name ERROR - output not found"
-        write_skip_error "$video_name" "output-not-found"
+        write_skip "$video_name" "output-not-found"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -304,7 +304,7 @@ post_transcode_checks() {
     video_new_size_mb=$(du -m "$output_path" | awk '{print $1}')
     if [[ $video_new_size_mb -eq 0 ]]; then
         write_log "$job $video_name ERROR, zero file size (${video_new_size_mb}MB), File NOT moved"
-        write_skip_error "$video_name" "zero-size"
+        write_skip "$video_name" "zero-size"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -323,7 +323,7 @@ post_transcode_checks() {
           $video_new_duration -lt $((video_duration - DURATION_TOLERANCE)) || \
           $video_new_duration -gt $((video_duration + DURATION_TOLERANCE)) ]]; then
         write_log "$job $video_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved"
-        write_skip_error "$video_name" "duration-mismatch"
+        write_skip "$video_name" "duration-mismatch"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -331,13 +331,13 @@ post_transcode_checks() {
     # Stream presence validation
     if [[ -z "$video_new_videocodec" || "$video_new_videocodec" == "null" ]]; then
         write_log "$job $video_name ERROR, no video stream detected, File NOT moved"
-        write_skip_error "$video_name" "no-video-stream"
+        write_skip "$video_name" "no-video-stream"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ -z "$video_new_audiocodec" || "$video_new_audiocodec" == "null" ]]; then
         write_log "$job $video_name ERROR, no audio stream detected, File NOT moved"
-        write_skip_error "$video_name" "no-audio-stream"
+        write_skip "$video_name" "no-audio-stream"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -350,19 +350,19 @@ post_transcode_checks() {
     local max_size_limit=$((video_size_mb + 500))
     if [[ $video_new_size_mb -gt $max_size_limit ]]; then
         write_log "$job $video_name ERROR, output significantly larger than original (${video_size_mb}MB -> ${video_new_size_mb}MB), File NOT moved"
-        write_skip_error "$video_name" "output-too-large"
+        write_skip "$video_name" "output-too-large"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ $diff_percent -lt $FFMPEG_MIN_DIFF ]]; then
         write_log "$job $video_name ERROR, min difference too small (${diff_percent}% < ${FFMPEG_MIN_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
-        write_skip_error "$video_name" "below-min-reduction"
+        write_skip "$video_name" "below-min-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ $diff_percent -gt $FFMPEG_MAX_DIFF ]]; then
         write_log "$job $video_name ERROR, max too high (${diff_percent}% > ${FFMPEG_MAX_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
-        write_skip_error "$video_name" "above-max-reduction"
+        write_skip "$video_name" "above-max-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi

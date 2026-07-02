@@ -196,10 +196,10 @@ main() {
         pre_codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
             -of default=noprint_wrappers=1:nokey=1 "$video" 2>/dev/null || true)
         local video_codec_skip_list="${CONFIG_SKIP_LIST[$config_name]}"
-        IFS=',' read -ra _skiplist <<<"$video_codec_skip_list"
-        local _skip
-        for _skip in "${_skiplist[@]}"; do
-            if [[ "$pre_codec" == "$_skip" ]]; then
+        IFS=',' read -ra skip_codecs <<<"$video_codec_skip_list"
+        local skip_codec
+        for skip_codec in "${skip_codecs[@]}"; do
+            if [[ "$pre_codec" == "$skip_codec" ]]; then
                 write_log "($((video_idx+1))) $video_basename (${video_size_mb}MB, $pre_codec) in video codec skip list, skipping"
                 write_skip "$video_basename" "codec-skip"
                 skip_lookup["$video_basename"]="codec-skip"
