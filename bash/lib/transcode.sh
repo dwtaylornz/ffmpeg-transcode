@@ -83,7 +83,7 @@ run_job_transcode() {
         -v $FFMPEG_LOGGING \
         -progress pipe:1 \
         -i $video_path_q \
-        -map 0:v:0 $audio_map -map 0:s? \
+        -map 0:v:0 $audio_map -sn \
         $ffmpeg_output_params \
         $audio_codec_override \
         $output_path_q 2>$ffmpeg_err_file_q"

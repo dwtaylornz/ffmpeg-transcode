@@ -243,28 +243,29 @@ main() {
                         continue
                     fi
 
-                    # Determine shm space available to this slot.
-                    local shm_free_mb reserved_mb effective_free t t_pid_var t_pid t_size_var
-                    shm_free_mb=$(df -m /dev/shm | awk 'NR==2 {print $4}')
-                    reserved_mb=0
+                    # Estimate: AV1 output is typically ~½ source size.
+                    local shm_total_mb t t_pid_var t_pid t_size_var
+                    shm_total_mb=$(df -m /dev/shm | awk 'NR==2 {print $2}')
+                    local estimated_mb=$((video_size_mb / 2))
+                    [[ $estimated_mb -lt 1 ]] && estimated_mb=1
                     for ((t = 1; t <= MAX_THREADS; t++)); do
                         [[ $t -eq $thread ]] && continue
                         t_pid_var="JOB_PID_$t"
                         t_pid="${!t_pid_var:-}"
                         if [[ -n "$t_pid" ]] && kill -0 "$t_pid" 2>/dev/null; then
                             t_size_var="JOB_SIZE_$t"
-                            reserved_mb=$((reserved_mb + ${!t_size_var:-0}))
+                            estimated_mb=$((estimated_mb + ${!t_size_var:-0} / 2))
                         fi
                     done
-                    effective_free=$((shm_free_mb - reserved_mb))
 
-                    # If other jobs are holding shm and there isn't room, try OOO or wait.
-                    if [[ $reserved_mb -gt 0 && $effective_free -lt $video_size_mb ]]; then
-                        if _try_ooo_dispatch "$thread" "$video_idx" "$effective_free" done_flag; then
+                    if [[ $estimated_mb -gt $shm_total_mb ]]; then
+                        local shm_free_mb
+                        shm_free_mb=$(df -m /dev/shm | awk 'NR==2 {print $4}')
+                        if _try_ooo_dispatch "$thread" "$video_idx" "$shm_free_mb" done_flag; then
                             break
                         fi
                         if [[ $((now - last_wait_log)) -ge $GPU_CHECK_INTERVAL ]]; then
-                            write_log "[WAIT] /dev/shm ${effective_free}MB available, need ${video_size_mb}MB for $video_basename — waiting for space"
+                            write_log "[WAIT] shm est ${estimated_mb}MB > capacity ${shm_total_mb}MB for $video_basename — waiting for jobs to finish"
                             last_wait_log=$now
                         fi
                         break

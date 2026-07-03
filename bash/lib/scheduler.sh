@@ -12,8 +12,8 @@ EXIT_SLEEP=${EXIT_SLEEP:-5}
 _try_ooo_dispatch() {
     local thread="$1"
     local video_idx="$2"
-    local effective_free="$3"
-    local -n _done_flag=$4     # set to 1 on success
+    local shm_free_mb="$3"          # actual df free on /dev/shm
+    local -n _done_flag=$4          # set to 1 on success
 
     local now
     now=$(date +%s)
@@ -24,7 +24,7 @@ _try_ooo_dispatch() {
 
     local vcn_ooo
     vcn_ooo=$(get_vcn_utilization)
-    if [[ $vcn_ooo -ge $GPU_TARGET_PCT || $effective_free -le 0 ]]; then
+    if [[ $vcn_ooo -ge $GPU_TARGET_PCT || $shm_free_mb -le 250 ]]; then
         return 1
     fi
 
@@ -37,8 +37,10 @@ _try_ooo_dispatch() {
         [[ -n "${skip_lookup[$la_base]:-}" ]] && continue
         [[ ! -f "$la_vid" ]] && continue
         [[ $la_sz_mb -lt ${CONFIG_MIN_SIZE[$la_cfg]} ]] && continue
-        if [[ $la_sz_mb -le $effective_free ]]; then
-            write_log "[OOO][T${thread}] $la_base (${la_sz_mb}MB) fits shm (${effective_free}MB free) — dispatching ahead"
+        # Candidate fits if there is at least 1/4 its source size free on shm
+        # (AV1 output is typically much smaller than the source).
+        if [[ $shm_free_mb -ge $((la_sz_mb / 4)) ]]; then
+            write_log "[OOO][T${thread}] $la_base (${la_sz_mb}MB) fits shm (${shm_free_mb}MB free) — dispatching ahead"
             run_job_transcode "$la_cfg" "$la_vid" "[T${thread}]" "$la_sz" &
             local new_pid=$!
             declare -g "JOB_PID_$thread=$new_pid"
@@ -72,16 +74,35 @@ _restart_queue() {
 # Evaluate whether to grant a headroom scale-up based on VCN utilization
 # averaged over the sampling window.
 _evaluate_headroom() {
-    local now video_size_mb
+    local now
     now=$(date +%s)
 
     if [[ $((now - last_scale_check)) -lt $GPU_CHECK_INTERVAL ]] || \
        [[ $((now - last_job_start)) -lt $GPU_RAMP_WAIT ]]; then
+        # Still log a basic STATUS on interval even during ramp-wait.
+        if [[ $((now - last_status_log)) -ge $GPU_CHECK_INTERVAL ]]; then
+            local _v _st _ar _t_ _pv_ _p_
+            _v=$(get_vcn_utilization)
+            _st=$(df -m /dev/shm | awk 'NR==2 {print $2}')
+            _ar=0
+            local _em=0
+            for ((_t_ = 1; _t_ <= MAX_THREADS; _t_++)); do
+                _pv_="JOB_PID_$_t_"
+                _p_="${!_pv_:-}"
+                if [[ -n "$_p_" ]] && kill -0 "$_p_" 2>/dev/null; then
+                    _ar=$((_ar + 1))
+                    _sv_="JOB_SIZE_$_t_"
+                    _em=$((_em + ${!_sv_:-0} / 2))
+                fi
+            done
+            write_log "[STATUS] VCN=${_v}% threads=${_ar}/${MAX_THREADS} shm est ${_em}/${_st}MB"
+            last_status_log=$now
+        fi
         return
     fi
     last_scale_check=$now
 
-    local vcn_pct shm_free_mb reserved_mb effective_free actual_running t t_pid_var t_pid t_size_var
+    local vcn_pct shm_total_mb actual_running t t_pid_var t_pid
     if [[ $vcn_sample_count -gt 0 ]]; then
         vcn_pct=$((vcn_sample_sum / vcn_sample_count))
     else
@@ -91,19 +112,25 @@ _evaluate_headroom() {
     vcn_sample_sum=0
     vcn_sample_count=0
 
-    shm_free_mb=$(df -m /dev/shm | awk 'NR==2 {print $4}')
-    reserved_mb=0
+    shm_total_mb=$(df -m /dev/shm | awk 'NR==2 {print $2}')
     actual_running=0
+    # Sum estimated output (source/2) of all running jobs.
+    local estimated_mb=0
     for ((t = 1; t <= MAX_THREADS; t++)); do
         t_pid_var="JOB_PID_$t"
         t_pid="${!t_pid_var:-}"
         if [[ -n "$t_pid" ]] && kill -0 "$t_pid" 2>/dev/null; then
             actual_running=$((actual_running + 1))
             t_size_var="JOB_SIZE_$t"
-            reserved_mb=$((reserved_mb + ${!t_size_var:-0}))
+            estimated_mb=$((estimated_mb + ${!t_size_var:-0} / 2))
         fi
     done
-    effective_free=$((shm_free_mb - reserved_mb))
+    # Next job estimate: average of running jobs.
+    local next_est=0
+    if [[ $actual_running -gt 0 ]]; then
+        next_est=$((estimated_mb / actual_running))
+    fi
+    [[ $next_est -lt 1 ]] && next_est=1
 
     local scale_action
     if [[ $actual_running -eq 0 ]]; then
@@ -115,7 +142,7 @@ _evaluate_headroom() {
             gpu_has_headroom=0
             low_vcn_streak=0
             scale_action="at max threads (${MAX_THREADS}/${MAX_THREADS})"
-        elif [[ $effective_free -lt ${video_size_mb:-0} ]]; then
+        elif [[ $((estimated_mb + next_est)) -gt $shm_total_mb ]]; then
             gpu_has_headroom=0
             low_vcn_streak=0
             scale_action="waiting for shm"
@@ -136,8 +163,7 @@ _evaluate_headroom() {
     fi
 
     if [[ $((now - last_status_log)) -ge $GPU_CHECK_INTERVAL ]]; then
-        local shm_display=$((effective_free < 0 ? 0 : effective_free))
-        write_log "[STATUS] VCN=${vcn_pct}% threads=${actual_running}/${MAX_THREADS} shm=${shm_display}MB available — ${scale_action}"
+        write_log "[STATUS] VCN=${vcn_pct}% threads=${actual_running}/${MAX_THREADS} shm est ${estimated_mb}/${shm_total_mb}MB — ${scale_action}"
         last_status_log=$now
     fi
 }
