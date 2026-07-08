@@ -1,10 +1,10 @@
 {
     "global_settings": {
-        "min_threads": 2,
+        "min_threads": 1,
         "max_threads": 8,
-        "gpu_target_pct": 95,
-        "gpu_ramp_wait": 30,
-        "gpu_check_interval": 30,
+        "gpu_target_pct": 80,
+        "gpu_ramp_wait": 60,
+        "gpu_check_interval": 10,
         "vcn_sample_interval": 1,
         "ffmpeg_input_params": "-err_detect ignore_err -ignore_unknown -vaapi_device /dev/dri/renderD128",
         "scan_at_start": 1,
@@ -14,21 +14,12 @@
         "ffmpeg_min_diff": 5,
         "ffmpeg_max_diff": 95,
         "move_file": 1,
-        "days_to_seconds": 86400,
-        "minutes_to_seconds": 60,
         "duration_tolerance": 30,
         "ffmpeg_nice_priority": 15,
         "skip_file": "./skip.csv",
         "sleep_before_move": 5,
         "sleep_after_move": 2,
-        "output_path": "/dev/shm/ffmpeg-transcode",
-        "colors": {
-            "red": "\u001b[1;91m",
-            "orange": "\u001b[0;33m",
-            "yellow": "\u001b[1;93m",
-            "green": "\u001b[1;92m",
-            "reset": "\u001b[0m"
-        }
+        "output_path": "/dev/shm/ffmpeg-transcode"
     },
     "configurations": [
         {

@@ -40,6 +40,7 @@ get_vcn_utilization() {
         cat "$busy_file"
         return
     fi
+    # Fallback: scan all cards
     for f in /sys/class/drm/card*/device/vcn_busy_percent; do
         [[ -r "$f" ]] && { cat "$f"; return; }
     done
@@ -64,10 +65,9 @@ load_config() {
         CONFIG_GLOBAL["$key"]="$value"
     done < <(jq -r '.global_settings | to_entries | .[] | select(.value | type != "object") | "\(.key)\t\(.value)"' "$config_file")
 
-    # Load colors specifically
     while IFS=$'\t' read -r key value; do
         CONFIG_GLOBAL["COLOR_$key"]="$value"
-    done < <(jq -r '.global_settings.colors | to_entries | .[] | "\(.key)\t\(.value)"' "$config_file")
+    done < <(jq -r '.global_settings.colors // {} | to_entries | .[] | "\(.key)\t\(.value)"' "$config_file")
 
     # Load configurations
     declare -gA CONFIG_MEDIA_PATH CONFIG_MIN_SIZE CONFIG_MIN_AGE CONFIG_FFMPEG_PARAMS CONFIG_SKIP_LIST
@@ -98,21 +98,30 @@ load_config() {
 #   green  = INFO
 write_log() {
     local log_string="$1"
+    local level="${2:-}"
     local log_file="./transcode.log"
     local stamp
     stamp="$(date '+%y/%m/%d %H:%M:%S')"
     local log_message="$stamp $log_string"
-    if [[ "$log_message" == *"ERROR"* ]]; then
-        echo -e "${COLOR_RED}$log_message${COLOR_RESET}"
-    elif [[ "$log_message" == *"WARN"* ]]; then
-        echo -e "${COLOR_ORANGE}$log_message${COLOR_RESET}"
-    elif [[ "$log_message" == *"SUCCESS"* ]]; then
-        echo -e "${COLOR_YELLOW}$log_message${COLOR_RESET}"
-    elif [[ "$log_message" == *"INFO"* ]]; then
-        echo -e "${COLOR_GREEN}$log_message${COLOR_RESET}"
-    else
-        echo "$log_message"
+    # Auto-detect level from message content if not explicitly provided
+    if [[ -z "$level" ]]; then
+        if [[ "$log_string" == *"ERROR"* ]]; then
+            level="ERROR"
+        elif [[ "$log_string" == *"WARN"* ]]; then
+            level="WARN"
+        elif [[ "$log_string" == *"SUCCESS"* ]]; then
+            level="SUCCESS"
+        elif [[ "$log_string" == *"INFO"* ]]; then
+            level="INFO"
+        fi
     fi
+    case "$level" in
+        ERROR)   echo -e "${COLOR_RED}$log_message${COLOR_RESET}" ;;
+        WARN)    echo -e "${COLOR_ORANGE}$log_message${COLOR_RESET}" ;;
+        SUCCESS) echo -e "${COLOR_YELLOW}$log_message${COLOR_RESET}" ;;
+        INFO)    echo -e "${COLOR_GREEN}$log_message${COLOR_RESET}" ;;
+        *)       echo "$log_message" ;;
+    esac
     echo "$log_message" >>"$log_file"
 }
 
@@ -123,10 +132,6 @@ write_skip() {
         printf '%s,%s\n' "$video_name" "$reason" >>"$SKIP_FILE"
         skip_lookup["$video_name"]="$reason"
     fi
-}
-
-write_skip_error() {
-    write_skip "$1" "$2"
 }
 
 initialize_output_folder() {
@@ -323,7 +328,8 @@ run_job_transcode() {
     if [[ "$scan_size_bytes" -gt 0 ]]; then
         video_size=$((scan_size_bytes / 1024 / 1024))
     else
-        video_size=$(du -m "$video_path" | awk '{print $1}')
+        video_size=$(stat --format=%s "$video_path" 2>/dev/null)
+        video_size=$((video_size / 1024 / 1024))
     fi
     local media_info_json
     media_info_json=$(get_media_info "$video_path")
@@ -350,7 +356,7 @@ run_job_transcode() {
     video_age=$(get_video_age "$video_path")
     if [[ "${audio_stream_count:-0}" -eq 0 ]]; then
         write_log "$job $video_name ERROR: no audio streams detected, deleting source file"
-        write_skip_error "$video_name" "no-audio-source"
+        write_skip "$video_name" "no-audio-source"
         rm -f "$video_path"
         return 1
     fi
@@ -358,7 +364,7 @@ run_job_transcode() {
     start_time=$(date +%s)
     write_log "$job $video_name ($video_codec, $audio_codec($audio_channels channel), $video_width, ${video_size}MB, $video_age days old) transcoding..."
     
-    local job_folder="/dev/shm/ffmpeg-transcode/job_${job//[()]/}"
+    local job_folder="/dev/shm/ffmpeg-transcode/job_$(echo "$job" | tr -d '[]()')"
     local output_path="$job_folder/$video_name"
     if [[ -d "$job_folder" ]]; then
         rm -rf "$job_folder"
@@ -382,19 +388,23 @@ run_job_transcode() {
         write_log "$job $video_name WARN: unidentified audio codec, re-encoding to AAC"
         audio_codec_override="-c:a aac -ac 2"
     fi
-    local video_path_q output_path_q ffmpeg_err_file_q
-    printf -v video_path_q    '%q' "$video_path"
-    printf -v output_path_q   '%q' "$output_path"
-    printf -v ffmpeg_err_file_q '%q' "$ffmpeg_err_file"
+    # Build the command string for eval.  Use single-quote wrapping for paths
+    # so that special characters ([, ], {, }, (, ), spaces) are preserved
+    # through the eval layer.  Any single-quote in the path itself is escaped
+    # by the standard bash pattern: end-quote, literal escaped quote, re-open.
+    local _sq="'"  # helper for the escape pattern below
+    local video_path_sq="'${video_path//$_sq/$_sq\\$_sq$_sq}'"
+    local output_path_sq="'${output_path//$_sq/$_sq\\$_sq$_sq}'"
+    local ffmpeg_err_file_sq="'${ffmpeg_err_file//$_sq/$_sq\\$_sq$_sq}'"
     local ffmpeg_cmd="ffmpeg -y \
         $FFMPEG_INPUT_PARAMS \
         -v $FFMPEG_LOGGING \
         -progress pipe:1 \
-        -i $video_path_q \
-        -map 0:v:0 $audio_map -map 0:s? \
+        -i $video_path_sq \
+        -map 0:v:0 $audio_map -map 0:s? -c:s copy \
         $ffmpeg_output_params \
         $audio_codec_override \
-        $output_path_q 2>$ffmpeg_err_file_q"
+        $output_path_sq 2>$ffmpeg_err_file_sq"
     # Launch ffmpeg in a subshell that execs the encoder.  Because the subshell
     # replaces itself with ffmpeg (via exec), $! is the PID of the actual
     # encoder process, not an idle bash wrapper.  This makes kill/wait on the
@@ -434,7 +444,7 @@ run_job_transcode() {
         # artifacts and returned a distinct exit code. Log the outcome, mark the
         # file as skipped, and return the abort code to the caller.
         write_log "$job $video_name INFO: transcode aborted early by monitor due to size inefficiency"
-        write_skip_error "$video_name" "early-abort-size-inefficient"
+        write_skip "$video_name" "early-abort-size-inefficient"
         return 2
     elif [[ $ffmpeg_exit -eq 0 ]]; then
         kill "$monitor_pid" 2>/dev/null || true
@@ -463,18 +473,18 @@ run_job_transcode() {
             case "$monitor_flag_content" in
                 early-abort-10pct|output-too-large)
                     write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original or early abort)"
-                    write_skip_error "$video_name" "killed-by-monitor"
+                    write_skip "$video_name" "killed-by-monitor"
                     ;;
                 *)
                     write_log "$job $video_name ERROR: ffmpeg killed by monitor (output larger than original)"
-                    write_skip_error "$video_name" "killed-by-monitor"
+                    write_skip "$video_name" "killed-by-monitor"
                     ;;
             esac
             cleanup_job_folder "$output_path"
             return 1
         else
             write_log "$job $video_name ERROR: ffmpeg failed (exit ${ffmpeg_exit})${ffmpeg_err_detail}"
-            write_skip_error "$video_name" "ffmpeg-crash-${ffmpeg_exit}"
+            write_skip "$video_name" "ffmpeg-crash-${ffmpeg_exit}"
             cleanup_job_folder "$output_path"
             return 1
         fi
@@ -488,7 +498,8 @@ cleanup_job_folder() {
     local output_path="$1"
     local job_folder
     job_folder=$(dirname "$output_path")
-    if [[ -d "$job_folder" && "$job_folder" == *"/dev/shm/ffmpeg-transcode/"* ]]; then
+    local shm_base="${CONFIG_GLOBAL["output_path"]:-/dev/shm/ffmpeg-transcode}"
+    if [[ -d "$job_folder" && "$job_folder" == "$shm_base/"* ]]; then
         rm -rf "$job_folder"
     fi
 }
@@ -543,18 +554,28 @@ monitor_progress() {
         sleep 5
         [[ ! -f "$progress_file" ]] && continue
 
+        # Read the latest progress values in a single pass (avoids 6 separate grep invocations)
         local total_size out_time_us out_time_ms speed fps frame
-        total_size=$(grep '^total_size=' "$progress_file" 2>/dev/null | tail -1 | cut -d= -f2 || true)
-        out_time_us=$(grep '^out_time_us=' "$progress_file" 2>/dev/null | tail -1 | cut -d= -f2 || true)
-        out_time_ms=$(grep '^out_time_ms=' "$progress_file" 2>/dev/null | tail -1 | cut -d= -f2 || true)
-        frame=$(grep '^frame=' "$progress_file" 2>/dev/null | tail -1 | cut -d= -f2 || true)
-        speed=$(grep '^speed=' "$progress_file" 2>/dev/null | tail -1 | cut -d= -f2 || true)
-        fps=$(grep '^fps=' "$progress_file" 2>/dev/null | tail -1 | cut -d= -f2 || true)
+        read -r total_size out_time_us out_time_ms speed fps frame <<<"$(awk -F= '
+            /^total_size=/  { ts=$2 }
+            /^out_time_us=/ { otu=$2 }
+            /^out_time_ms=/ { otm=$2 }
+            /^speed=/       { sp=$2 }
+            /^fps=/         { f=$2 }
+            /^frame=/       { fr=$2 }
+            END { print ts+0, otu+0, otm+0, sp+0, f+0, fr+0 }
+        ' "$progress_file" 2>/dev/null)"
+        total_size=${total_size:-}
+        out_time_us=${out_time_us:-}
+        out_time_ms=${out_time_ms:-}
+        speed=${speed:-}
+        fps=${fps:-}
+        frame=${frame:-}
         # FFmpeg's out_time_ms/out_time_us are both in microseconds. Normalize to seconds.
         local elapsed_us=""
-        if [[ "$out_time_us" =~ ^[0-9]+$ ]]; then
+        if [[ "$out_time_us" =~ ^[0-9]+$ && "$out_time_us" -gt 0 ]]; then
             elapsed_us=$out_time_us
-        elif [[ "$out_time_ms" =~ ^[0-9]+$ ]]; then
+        elif [[ "$out_time_ms" =~ ^[0-9]+$ && "$out_time_ms" -gt 0 ]]; then
             elapsed_us=$out_time_ms
         fi
         local elapsed_sec=""
@@ -613,8 +634,8 @@ monitor_progress() {
         now=$(date +%s)
         if [[ $((now - last_log_time)) -ge 30 ]]; then
             local pct="?"
-            if [[ "$out_time_us" =~ ^[0-9]+$ && "$video_duration" -gt 0 ]]; then
-                pct=$(( out_time_us * 100 / 1000000 / video_duration ))
+            if [[ -n "$elapsed_us" && "$video_duration" -gt 0 ]]; then
+                pct=$(( elapsed_us * 100 / 1000000 / video_duration ))
             fi
             write_log "$job $video_name progress: ${pct}% elapsed=${elapsed_sec:-?}s frame=${frame:-?} fps=${fps:-?} speed=${speed:-?}"
             last_log_time=$(date +%s)
@@ -637,15 +658,16 @@ post_transcode_checks() {
 
     if [[ ! -f "$output_path" ]]; then
         write_log "$job $video_name ERROR - output not found"
-        write_skip_error "$video_name" "output-not-found"
+        write_skip "$video_name" "output-not-found"
         cleanup_job_folder "$output_path"
         return 1
     fi
     local video_new_size_mb
-    video_new_size_mb=$(du -m "$output_path" | awk '{print $1}')
+    video_new_size_mb=$(stat --format=%s "$output_path" 2>/dev/null)
+    video_new_size_mb=$((video_new_size_mb / 1024 / 1024))
     if [[ $video_new_size_mb -eq 0 ]]; then
         write_log "$job $video_name ERROR, zero file size (${video_new_size_mb}MB), File NOT moved"
-        write_skip_error "$video_name" "zero-size"
+        write_skip "$video_name" "zero-size"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -672,19 +694,19 @@ post_transcode_checks() {
     fi
     if [[ -z "$video_new_duration" || "$video_new_duration" -eq 0 || $video_new_duration -lt $((video_duration - DURATION_TOLERANCE)) || $video_new_duration -gt $((video_duration + DURATION_TOLERANCE)) ]]; then
         write_log "$job $video_name ERROR, incorrect duration on new video ($video_duration -> $video_new_duration), File NOT moved"
-        write_skip_error "$video_name" "duration-mismatch"
+        write_skip "$video_name" "duration-mismatch"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ -z "$video_new_videocodec" || "$video_new_videocodec" == "null" ]]; then
         write_log "$job $video_name ERROR, no video stream detected, File NOT moved"
-        write_skip_error "$video_name" "no-video-stream"
+        write_skip "$video_name" "no-video-stream"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ -z "$video_new_audiocodec" || "$video_new_audiocodec" == "null" ]]; then
         write_log "$job $video_name ERROR, no audio stream detected, File NOT moved"
-        write_skip_error "$video_name" "no-audio-stream"
+        write_skip "$video_name" "no-audio-stream"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -699,19 +721,19 @@ post_transcode_checks() {
     local max_size_limit=$((video_size_mb + 500))
     if [[ $video_new_size_mb -gt $max_size_limit ]]; then
         write_log "$job $video_name ERROR, output significantly larger than original (${video_size_mb}MB -> ${video_new_size_mb}MB), File NOT moved"
-        write_skip_error "$video_name" "output-too-large"
+        write_skip "$video_name" "output-too-large"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ $diff_percent -lt $FFMPEG_MIN_DIFF ]]; then
         write_log "$job $video_name ERROR, min difference too small (${diff_percent}% < ${FFMPEG_MIN_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
-        write_skip_error "$video_name" "below-min-reduction"
+        write_skip "$video_name" "below-min-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi
     if [[ $diff_percent -gt $FFMPEG_MAX_DIFF ]]; then
         write_log "$job $video_name ERROR, max too high (${diff_percent}% > ${FFMPEG_MAX_DIFF}%) ${video_size_mb}MB -> ${video_new_size_mb}MB, File NOT moved"
-        write_skip_error "$video_name" "above-max-reduction"
+        write_skip "$video_name" "above-max-reduction"
         cleanup_job_folder "$output_path"
         return 1
     fi
@@ -732,12 +754,16 @@ post_transcode_checks() {
     else
         write_log "$job $video_name Transcode time: $total_time_formatted, Saved: ${diff_mb}MB (${video_size_mb}MB -> ${video_new_size_mb}MB) or ${diff_percent}%"
         write_log "$job $video_name video codec $video_codec -> $video_new_videocodec, audio codec $audio_codec -> $video_new_audiocodec"
-        write_log "$job $video_name SUCCESS, moving file (DO NOT BREAK DURING MOVE)..."
+        write_log "$job $video_name SUCCESS, moving file..."
         sleep $SLEEP_BEFORE_MOVE
-        mv -f "$output_path" "$video_path"
+        # Copy synchronously, then clean up.  A background cp + immediate rm
+        # creates a race: if cp hasn't opened the file before rm removes it,
+        # cp fails with "cannot stat".  Synchronous copy is reliable.
+        cp "$output_path" "$video_path"
+        rm -f "$output_path"
         write_skip "$video_name" "transcoded"
-        sleep $SLEEP_AFTER_MOVE
         cleanup_job_folder "$output_path"
+        sleep $SLEEP_AFTER_MOVE
     fi
     return 0
 }
@@ -768,7 +794,6 @@ MINUTES_TO_SECONDS=60
 # DURATION_TOLERANCE, FFMPEG_MIN_DIFF, FFMPEG_MAX_DIFF, FFMPEG_NICE_PRIORITY,
 # SLEEP_BEFORE_MOVE, SLEEP_AFTER_MOVE are set in load_config from JSON.
 SCAN_AT_START=${CONFIG_GLOBAL["scan_at_start"]:-0}
-SKIP_FILE=${CONFIG_GLOBAL["skip_file"]:-"./skip.csv"}
 MOVE_FILE=${CONFIG_GLOBAL["move_file"]:-0}
 
 initialize_output_folder
@@ -928,6 +953,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                     # that gap would scale up on a false reading.
                     unset $pid_var
                     unset $start_var
+                    unset "JOB_SIZE_$thread"
                     last_job_start=$(date +%s)
                 fi
                 # Scale down by omission: base slots (<= MIN_THREADS) always
@@ -938,9 +964,12 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                     continue
                 fi
                 
-                # Determine shm space available to this slot, accounting for the
-                # shm already reserved by every other currently-running job.
-                shm_free_mb=$(df -m /dev/shm | awk 'NR==2 {print $4}')
+                # Cache df result (re-read at most once per second)
+                if [[ -z "${shm_cached_free:-}" || -z "${shm_cached_at:-}" || $(($(date +%s) - shm_cached_at)) -ge 1 ]]; then
+                    shm_cached_free=$(df -m /dev/shm | awk 'NR==2 {print $4}')
+                    shm_cached_at=$(date +%s)
+                fi
+                shm_free_mb=$shm_cached_free
                 reserved_mb=0
                 for ((t = 1; t <= MAX_THREADS; t++)); do
                     [[ $t -eq $thread ]] && continue
@@ -1114,8 +1143,5 @@ for ((thread = 1; thread <= MAX_THREADS; thread++)); do
         wait "$pid"
     fi
 done
-rm -f "$SKIP_FILE"
-write_log "Removed skip files - next run will process all files"
 write_log "Finished processing"
-sleep 120
 exit 0
