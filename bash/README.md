@@ -197,10 +197,17 @@ Set `MOVE_FILE=0` to enable testing mode:
 - Automatic process priority adjustment
 - Memory-efficient temporary storage using `/dev/shm`
 
+### Smart SHM Reservation
+- Expected-output-size reservation frees up `/dev/shm` for more concurrent jobs
+- Configurable safety margin and floor to balance risk vs. throughput
+- Duration-based estimate avoids over-reserving for long, high-bitrate sources
+- Capped at source size for safety when bitrate metadata is unreliable
+
 ### Queue Management
 - Automatic queue restart to pick up new files
 - Size-based processing order (largest first)
 - Skip list optimization for faster subsequent runs
+- Out-of-order dispatch: when the next video can't fit in SHM, a smaller video may jump the queue to keep the GPU busy
 
 ## Troubleshooting
 

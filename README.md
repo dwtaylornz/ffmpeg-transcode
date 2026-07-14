@@ -9,6 +9,7 @@ A cross-platform media transcoding automation tool that helps reduce storage con
 - Background scanning and parallel transcoding with configurable job counts
 - Multiple media path configurations (Linux)
 - Automatic GPU utilization monitoring and dynamic thread ramping (Linux)
+- **Smart SHM reservation (Linux)** — estimates `/dev/shm` space per job from expected output size (`duration × target bitrate`) instead of reserving the full source size, enabling much higher concurrency and better GPU utilization
 - Configurable encoding parameters and quality settings
 - Extensive error checking and validation (duration, size, codec, stream)
 - **Early size-efficiency abort at 10% playback (Linux)** — stops a transcode early if the output is already larger than 10% of the original file size at 10% of the playback time, avoiding wasted encoding time on files that will not shrink enough
@@ -96,6 +97,23 @@ Both implementations maintain detailed logs and tracking:
 - Error logs for failed transcodes
 - Progress tracking for ongoing operations
 
+### Linux Smart SHM Reservation Details
+
+The Linux script (`bash/transcode.sh`) now reserves `/dev/shm` space based on **expected output size** rather than the full source file size. Previously, a 10 GB source file would reserve 10 GB of shared memory, severely capping concurrent transcodes and starving the GPU.
+
+Instead, `calc_reserve()` computes:
+\[
+\text{reserve\_mb} = \frac{\text{duration(s)} \times \text{target\_bitrate(Mbps)}}{8} \times \text{safety\_pct}
+\]
+
+- **Target bitrate** is extracted from `ffmpeg_output_params` via `parse_bv()`: prefers `-maxrate` (peak) for a safe upper bound, falls back to `-b:v` (average), defaults to 5 Mbps.
+- **Safety margin** is configurable via `shm_reserve_safety_pct` (default 130%) to account for muxing overhead.
+- **Floor** is configurable via `shm_reserve_floor_mb` (default 200 MB) for very short files.
+- The reservation is **capped at the source file size** (for cases where bitrate exceeds source bitrate).
+- When duration is unavailable (e.g., corrupt headers), the script falls back to the conservative source-size approach.
+
+This change directly improves GPU utilization: the GPU is no longer idle waiting for `/dev/shm` to free up, because many more concurrent jobs can fit in the same memory budget.
+
 ### Linux 10% Early-Abort Details
 
 The Linux script (`bash/transcode.sh`) now parses FFmpeg `-progress` output in real time. While a transcode is running, the monitor compares the encoded output size to the original file size. As soon as the encode reaches **10% of the original playback time** and the output has already reached **10% of the original file size**, it assumes the final encode is unlikely to be smaller than the source and aborts the transcode early. This saves the time that would otherwise be spent encoding the remaining 90% of a file that will not yield useful space savings.
@@ -110,6 +128,13 @@ Behavior on early abort:
 Files already handled by the post-transcode size check (output larger than original at completion) are still caught as before; the 10% check adds an earlier guard for long encodes.
 
 For more detailed information about each platform's implementation, see the platform-specific README files in the `bash/` and `powershell/` directories.
+
+### Configuration — New Global Settings (Linux)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `shm_reserve_safety_pct` | `130` | Safety margin percentage applied to the expected output size when reserving `/dev/shm` space |
+| `shm_reserve_floor_mb` | `200` | Minimum `/dev/shm` reservation per job (MB), ensuring very short files get a reasonable allocation |
 
 ## Contributing
 
