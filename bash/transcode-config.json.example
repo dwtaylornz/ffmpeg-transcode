@@ -19,7 +19,9 @@
         "skip_file": "./skip.csv",
         "sleep_before_move": 5,
         "sleep_after_move": 2,
-        "output_path": "/dev/shm/ffmpeg-transcode"
+        "output_path": "/dev/shm/ffmpeg-transcode",
+        "shm_reserve_safety_pct": 130,
+        "shm_reserve_floor_mb": 200
     },
     "configurations": [
         {

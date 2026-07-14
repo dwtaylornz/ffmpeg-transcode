@@ -241,6 +241,45 @@ get_video_age() {
     echo $(((now - ctime) / DAYS_TO_SECONDS))
 }
 
+# Extract the target video bitrate (Mbps, integer) from a configuration's
+# ffmpeg_output_params. Prefers -maxrate (peak) for a safe upper bound, then
+# falls back to -b:v (average). Returns 5 if neither is present.
+parse_bv() {
+    local p="$1"
+    local v num unit
+    v=$(echo "$p" | grep -oE '\-maxrate[ =][0-9]+[kKmMgG]?' | grep -oE '[0-9]+[kKmMgG]?$')
+    [[ -z "$v" ]] && v=$(echo "$p" | grep -oE '\-b:v[ =][0-9]+[kKmMgG]?' | grep -oE '[0-9]+[kKmMgG]?$')
+    [[ -z "$v" ]] && { echo 5; return; }
+    num=$(echo "$v" | grep -oE '^[0-9]+')
+    unit=$(echo "$v" | grep -oE '[kKmMgG]$')
+    case "$unit" in
+        k|K) echo $(( num / 1000 )) ;;
+        m|M) echo "$num" ;;
+        g|G) echo $(( num * 1000 )) ;;
+        *)   echo $(( num / 1000000 )) ;;
+    esac
+}
+
+# Estimate the shm space (MB) a transcode job will need. Based on EXPECTED
+# output size = duration(s) * target_bitrate(Mbps) / 8, with a safety margin.
+# Falls back to the full source size when duration is unknown, and never
+# reserves more than the source. This replaces the old behaviour of reserving
+# the entire source size, which starved concurrency and under-fed the GPU.
+calc_reserve() {
+    local cfg="$1" sz_mb="$2" dur="$3"
+    local bv=${CONFIG_BV_MB[$cfg]:-5}
+    local out=0
+    if [[ -n "$dur" && "$dur" =~ ^[0-9]+$ && "$dur" -gt 0 ]]; then
+        out=$(( dur * bv / 8 ))                         # MB at average target bitrate
+        out=$(( out * ${SHM_RESERVE_SAFETY_PCT:-130} / 100 ))  # safety margin
+        [[ $out -lt ${SHM_RESERVE_FLOOR_MB:-200} ]] && out=${SHM_RESERVE_FLOOR_MB:-200}
+    else
+        out=$sz_mb                                      # fallback: conservative source size
+    fi
+    [[ $out -gt $sz_mb ]] && out=$sz_mb                 # never exceed the source
+    echo "$out"
+}
+
 get_media_info() {
     local video_path="$1"
     ffprobe -v quiet -print_format json -show_streams -show_format "$video_path"
@@ -795,6 +834,14 @@ MINUTES_TO_SECONDS=60
 # SLEEP_BEFORE_MOVE, SLEEP_AFTER_MOVE are set in load_config from JSON.
 SCAN_AT_START=${CONFIG_GLOBAL["scan_at_start"]:-0}
 MOVE_FILE=${CONFIG_GLOBAL["move_file"]:-0}
+# shm reservation tuning for expected-output sizing (P0 fix)
+SHM_RESERVE_SAFETY_PCT=${CONFIG_GLOBAL["shm_reserve_safety_pct"]:-130}
+SHM_RESERVE_FLOOR_MB=${CONFIG_GLOBAL["shm_reserve_floor_mb"]:-200}
+declare -A CONFIG_BV_MB
+declare -A dur_lookup
+for cfg in "${CONFIG_NAMES[@]}"; do
+    CONFIG_BV_MB["$cfg"]=$(parse_bv "${CONFIG_FFMPEG_PARAMS[$cfg]}")
+done
 
 initialize_output_folder
 show_state
@@ -913,8 +960,18 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
         video_idx=$((video_idx + 1))
         continue
     fi
-    pre_codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
-        -of default=noprint_wrappers=1:nokey=1 "$video" 2>/dev/null || true)
+    _probe=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name:format=duration \
+        -of default=noprint_wrappers=1 "$video" 2>/dev/null || true)
+    pre_codec=$(echo "$_probe" | awk -F= '/codec_name/{print $2; exit}')
+    video_dur=$(echo "$_probe" | awk -F= '/duration/{print $2; exit}')
+    video_dur=${video_dur%.*}
+    [[ "$video_dur" =~ ^[0-9]+$ ]] || video_dur=0
+    dur_lookup["$video"]=$video_dur
+    # Reserve shm by EXPECTED output size (duration * target bitrate), not the
+    # full source size. The AV1 output is a small fraction of the source, so
+    # reserving the source size needlessly caps concurrency and starves the GPU.
+    # Falls back to source size when duration is unknown.
+    reserve_mb=$(calc_reserve "$config_name" "$video_size_mb" "$video_dur")
     video_codec_skip_list="${CONFIG_SKIP_LIST[$config_name]}"
     IFS=',' read -ra _skiplist <<<"$video_codec_skip_list"
     for _skip in "${_skiplist[@]}"; do
@@ -984,7 +1041,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
 
                 # If other jobs are holding shm and there isn't room for the
                 # current video, try a smaller out-of-order video, else wait.
-                if [[ $reserved_mb -gt 0 && $effective_free -lt $video_size_mb ]]; then
+                if [[ $reserved_mb -gt 0 && $effective_free -lt $reserve_mb ]]; then
                     now=$(date +%s)
                     if [[ $((now - last_ooo_check)) -ge 5 ]]; then
                         last_ooo_check=$now
@@ -998,13 +1055,14 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                                 [[ -n "${skip_lookup[$la_base]:-}" ]] && continue
                                 [[ ! -f "$la_vid" ]] && continue
                                 [[ $la_sz_mb -lt ${CONFIG_MIN_SIZE[$la_cfg]} ]] && continue
-                                if [[ $la_sz_mb -le $effective_free ]]; then
-                                    write_log "[OOO][T${thread}] $la_base (${la_sz_mb}MB) fits shm (${effective_free}MB free) — dispatching ahead of $video_basename (needs ${video_size_mb}MB)"
+                                la_reserve=$(calc_reserve "$la_cfg" "$la_sz_mb" "${dur_lookup[$la_vid]:-0}")
+                                if [[ $la_reserve -le $effective_free ]]; then
+                                    write_log "[OOO][T${thread}] $la_base (${la_reserve}MB est) fits shm (${effective_free}MB free) — dispatching ahead of $video_basename (needs ${reserve_mb}MB)"
                                     run_job_transcode "$la_cfg" "$la_vid" "[T${thread}]" "$la_sz" &
                                     new_pid=$!
                                     declare $pid_var=$new_pid
                                     declare $start_var="$(date +%s)"
-                                    declare "JOB_SIZE_$thread=$la_sz_mb"
+                                    declare "JOB_SIZE_$thread=$la_reserve"
                                     last_job_start=$(date +%s)
                                     # Consume the headroom grant; the next
                                     # scale-up must be re-confirmed by the status
@@ -1022,7 +1080,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                         break
                     fi
                     if [[ $((now - last_wait_log)) -ge $GPU_CHECK_INTERVAL ]]; then
-                        echo "[WAIT] /dev/shm ${effective_free}MB available, need ${video_size_mb}MB for $video_basename — waiting for space"
+                        echo "[WAIT] /dev/shm ${effective_free}MB available, need ${reserve_mb}MB for $video_basename — waiting for space"
                         last_wait_log=$now
                     fi
                     break
@@ -1034,7 +1092,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                 new_pid=$!
                 declare $pid_var=$new_pid
                 declare $start_var="$(date +%s)"
-                declare "JOB_SIZE_$thread=$video_size_mb"
+                declare "JOB_SIZE_$thread=$reserve_mb"
                 last_job_start=$(date +%s)
                 # Consume the headroom grant; the next scale-up must be
                 # re-confirmed by the status check after the ramp wait.
@@ -1094,7 +1152,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                     gpu_has_headroom=0
                     low_vcn_streak=0
                     scale_action="at max threads (${MAX_THREADS}/${MAX_THREADS})"
-                elif [[ $effective_free -lt $video_size_mb ]]; then
+                elif [[ $effective_free -lt $reserve_mb ]]; then
                     # GPU has headroom but shm is full — adding a task won't
                     # help, the constraint is memory not the GPU.
                     gpu_has_headroom=0
