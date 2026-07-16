@@ -6,7 +6,6 @@ set -euo pipefail
 # ============================================================================
 # CONFIGURATION & ARGUMENTS
 # ============================================================================
-# Colors
 COLOR_RED="\033[1;91m"
 COLOR_ORANGE="\033[0;33m"
 COLOR_YELLOW="\033[1;93m"
@@ -16,31 +15,15 @@ COLOR_RESET="\033[0m"
 # UTILITY FUNCTIONS
 # ============================================================================
 check_dependencies() {
-    if ! command -v jq &> /dev/null; then
-        echo "ERROR: jq is required but not installed. Please install jq to continue."
-        exit 1
-    fi
-    if ! command -v ffmpeg &> /dev/null; then
-        echo "ERROR: ffmpeg is required but not installed. Please install ffmpeg to continue."
-        exit 1
-    fi
-    if ! command -v ffprobe &> /dev/null; then
-        echo "ERROR: ffprobe is required but not installed. Please install ffprobe to continue."
-        exit 1
-    fi
+    for cmd in jq ffmpeg ffprobe; do
+        if ! command -v "$cmd" &> /dev/null; then
+            echo "ERROR: $cmd is required but not installed. Please install it to continue."
+            exit 1
+        fi
+    done
 }
 
 get_vcn_utilization() {
-    local render_dev
-    render_dev=$(basename "${FFMPEG_VAAPI_DEVICE:-/dev/dri/renderD128}")
-    local device_path
-    device_path=$(readlink -f "/sys/class/drm/${render_dev}/device" 2>/dev/null)
-    local busy_file="${device_path}/vcn_busy_percent"
-    if [[ -r "$busy_file" ]]; then
-        cat "$busy_file"
-        return
-    fi
-    # Fallback: scan all cards
     for f in /sys/class/drm/card*/device/vcn_busy_percent; do
         [[ -r "$f" ]] && { cat "$f"; return; }
     done
@@ -103,7 +86,7 @@ write_log() {
     local stamp
     stamp="$(date '+%y/%m/%d %H:%M:%S')"
     local log_message="$stamp $log_string"
-    # Auto-detect level from message content if not explicitly provided
+    # Auto-detect level from message content when not explicitly provided
     if [[ -z "$level" ]]; then
         if [[ "$log_string" == *"ERROR"* ]]; then
             level="ERROR"
@@ -136,11 +119,8 @@ write_skip() {
 
 initialize_output_folder() {
     local output_path="${CONFIG_GLOBAL["output_path"]:-/dev/shm/ffmpeg-transcode}"
-    if [[ ! -d "$output_path" ]]; then
-        mkdir -p "$output_path"
-    else
-        rm -rf "${output_path:?}"/*
-    fi
+    rm -rf "${output_path:?}"
+    mkdir -p "$output_path"
 }
 
 cleanup_shm() {
@@ -148,23 +128,9 @@ cleanup_shm() {
     [[ -d "$shm_path" ]] && rm -rf "$shm_path"
 }
 
-# Recursively print all descendant PIDs of a given root PID (one per line).
-# The output is deepest-first so that callers can kill children before parents.
-get_descendant_pids() {
-    local parent="$1"
-    local children
-    children=$(pgrep -P "$parent" 2>/dev/null || true)
-    [[ -z "$children" ]] && return
-    local child
-    for child in $children; do
-        get_descendant_pids "$child"
-        echo "$child"
-    done
-}
-
-# Terminate a process and its entire descendant tree.  Children are killed
-# before their parent so the parent cannot respawn them or leave them orphaned.
-# SIGTERM is sent first with a short grace period, then SIGKILL for stragglers.
+# Terminate a process and its entire descendant tree.
+# Children are killed before their parent so the parent cannot respawn them.
+# Uses pkill -P for direct children + SIGTERM/SIGKILL with grace period.
 kill_tree() {
     local root="${1:-}"
     [[ -z "$root" ]] && return
@@ -172,29 +138,19 @@ kill_tree() {
     if ! kill -0 "$root" 2>/dev/null; then
         return
     fi
-    local descendants
-    descendants=$(get_descendant_pids "$root")
-    # SIGTERM every descendant, then the root.
-    local pid
-    for pid in $descendants "$root"; do
-        [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
-    done
-    # Give graceful shutdown a brief window.
+    # SIGTERM children first, then root
+    pkill -P "$root" 2>/dev/null || true
+    kill -TERM "$root" 2>/dev/null || true
+    # Grace period
     local waited=0
-    while [[ $waited -lt 10 ]]; do
-        if ! kill -0 "$root" 2>/dev/null; then
-            break
-        fi
+    while [[ $waited -lt 10 ]] && kill -0 "$root" 2>/dev/null; do
         sleep 0.2
         waited=$((waited + 1))
     done
-    # SIGKILL anything still alive.
-    for pid in $descendants "$root"; do
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-            kill -KILL "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-        fi
-    done
+    # SIGKILL survivors
+    pkill -9 -P "$root" 2>/dev/null || true
+    kill -KILL "$root" 2>/dev/null || true
+    wait "$root" 2>/dev/null || true
 }
 
 # Kill every running transcode job (the whole process tree: ffmpeg, monitor,
@@ -214,7 +170,7 @@ abort_handler() {
         unset "JOB_START_$thread" 2>/dev/null || true
         unset "JOB_SIZE_$thread" 2>/dev/null || true
     done
-    cleanup_shm
+    # cleanup_shm is handled by the EXIT trap
     # 128 + signal number: SIGINT=2, SIGTERM=15, SIGHUP=1
     case "$sig" in
         INT) exit 130 ;;
@@ -409,17 +365,9 @@ run_job_transcode() {
         rm -rf "$job_folder"
     fi
     mkdir -p "$job_folder"
-    # Use a named pipe for -progress so the monitor can read the latest line
-    # without fighting file offsets and so parsing is non-blocking. A background
-    # sink copies ffmpeg's progress lines to a regular file. The sink exits
-    # automatically when ffmpeg closes the pipe.
-    local progress_pipe="/tmp/ffmpeg_progress_${BASHPID}"
-    local progress_file="/tmp/ffmpeg_progress_file_${BASHPID}"
+    local progress_file="/tmp/ffmpeg_progress_${BASHPID}"
     local ffmpeg_err_file="/tmp/ffmpeg_err_${BASHPID}"
-    rm -f "$progress_pipe" "$progress_file"
-    mkfifo "$progress_pipe"
-    ( cat <"$progress_pipe" >"$progress_file" ) &
-    local progress_sink_pid=$!
+    rm -f "$progress_file"
 
     local audio_map="-map 0:a?"
     local audio_codec_override=""
@@ -438,7 +386,7 @@ run_job_transcode() {
     local ffmpeg_cmd="ffmpeg -y \
         $FFMPEG_INPUT_PARAMS \
         -v $FFMPEG_LOGGING \
-        -progress pipe:1 \
+        -progress \"$progress_file\" \
         -i $video_path_sq \
         -map 0:v:0 $audio_map -map 0:s? -c:s copy \
         $ffmpeg_output_params \
@@ -450,9 +398,9 @@ run_job_transcode() {
     # PID reliable and prevents orphaned wrappers from keeping pipe fds open.
     (
         eval "exec nice -n $FFMPEG_NICE_PRIORITY $ffmpeg_cmd"
-    ) >"$progress_pipe" &
+    ) &
     local ffmpeg_pid=$!
-    monitor_progress "$progress_file" "$scan_size_bytes" "$ffmpeg_pid" "$job" "$video_name" "$video_duration" "$output_path" "$progress_pipe" "$ffmpeg_err_file" &
+    monitor_progress "$progress_file" "$scan_size_bytes" "$ffmpeg_pid" "$job" "$video_name" "$video_duration" "$output_path" "$ffmpeg_err_file" &
     local monitor_pid=$!
     local monitor_rc=0
     wait "$monitor_pid" 2>/dev/null || monitor_rc=$?
@@ -461,22 +409,6 @@ run_job_transcode() {
     local ffmpeg_exit=0
     wait "$ffmpeg_pid" 2>/dev/null || ffmpeg_exit=$?
     ffmpeg_exit=${ffmpeg_exit:-0}
-    # Close the write side of the FIFO so the sink sees EOF and terminates cleanly.
-    rm -f "$progress_pipe"
-    # The sink can block if an orphaned process still holds the write fd, so
-    # guard wait with a short timeout.
-    local sink_done=0
-    for _ in {1..10}; do
-        if ! kill -0 "$progress_sink_pid" 2>/dev/null; then
-            sink_done=1
-            break
-        fi
-        sleep 0.2
-    done
-    if [[ $sink_done -eq 0 ]]; then
-        kill -9 "$progress_sink_pid" 2>/dev/null || true
-    fi
-    wait "$progress_sink_pid" 2>/dev/null || true
 
     if [[ $monitor_rc -eq 2 ]]; then
         # Monitor initiated an early abort; the monitor has already cleaned up
@@ -488,7 +420,7 @@ run_job_transcode() {
     elif [[ $ffmpeg_exit -eq 0 ]]; then
         kill "$monitor_pid" 2>/dev/null || true
         wait "$monitor_pid" 2>/dev/null || true
-        rm -f "/tmp/monitor_kill_${ffmpeg_pid}" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" 2>/dev/null || true
+        rm -f "/tmp/monitor_kill_${ffmpeg_pid}" "$progress_file" "$ffmpeg_err_file" 2>/dev/null || true
         if ! post_transcode_checks "$video_path" "$output_path" "$video_name" "$video_codec" "$audio_codec" "$video_duration" "$video_size" "$job" "$start_time"; then
             return 1
         fi
@@ -507,7 +439,7 @@ run_job_transcode() {
         if [[ -s "$ffmpeg_err_file" ]]; then
             ffmpeg_err_detail=" — $(tail -1 "$ffmpeg_err_file" | tr -d '\n')"
         fi
-        rm -f "$progress_pipe" "$progress_file" "$ffmpeg_err_file" 2>/dev/null || true
+        rm -f "$progress_file" "$ffmpeg_err_file" 2>/dev/null || true
         if [[ $monitor_killed_ffmpeg -eq 1 ]]; then
             case "$monitor_flag_content" in
                 early-abort-10pct|output-too-large)
@@ -545,31 +477,23 @@ cleanup_job_folder() {
 
 abort_early_cleanup() {
     local output_path="$1"
-    local progress_pipe="$2"
-    local progress_file="$3"
-    local ffmpeg_err_file="$4"
-    local monitor_flag="$5"
-    local ffmpeg_pid="${6:-}"
+    local progress_file="$2"
+    local ffmpeg_err_file="$3"
+    local monitor_flag="$4"
+    local ffmpeg_pid="${5:-}"
 
     # Ensure ffmpeg is gone (safety net when the caller's own kill sequence may
-    # have raced or the PID was reused).  With the exec launch, $ffmpeg_pid is
-    # the real encoder PID, so this is reliable.
+    # have raced or the PID was reused).
     if [[ -n "$ffmpeg_pid" ]] && kill -0 "$ffmpeg_pid" 2>/dev/null; then
         kill -9 "$ffmpeg_pid" 2>/dev/null || true
         wait "$ffmpeg_pid" 2>/dev/null || true
     fi
 
-    # Close the progress pipe so the sink sees EOF and exits.  This avoids
-    # wait $progress_sink_pid blocking forever on an orphaned ffmpeg write fd.
-    if [[ -n "$progress_pipe" ]] && [[ -p "$progress_pipe" ]]; then
-        rm -f "$progress_pipe"
-    fi
-
     # Remove the partially written output and its temporary job folder.
     cleanup_job_folder "$output_path"
 
-    # Remove named pipe, progress capture, error log, and monitor flag.
-    rm -f "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" 2>/dev/null || true
+    # Remove progress capture, error log, and monitor flag.
+    rm -f "$progress_file" "$ffmpeg_err_file" "$monitor_flag" 2>/dev/null || true
 }
 
 # ============================================================================
@@ -583,8 +507,7 @@ monitor_progress() {
     local video_name="$5"
     local video_duration="$6"
     local output_path="${7:-}"
-    local progress_pipe="${8:-}"
-    local ffmpeg_err_file="${9:-}"
+    local ffmpeg_err_file="${8:-}"
     local monitor_flag="/tmp/monitor_kill_${ffmpeg_pid}"
     local last_log_time=0
     local now
@@ -651,7 +574,7 @@ monitor_progress() {
                         grace=$((grace + 1))
                     done
                     kill -9 "$ffmpeg_pid" 2>/dev/null || true
-                    abort_early_cleanup "$output_path" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" "$ffmpeg_pid"
+                    abort_early_cleanup "$output_path" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" "$ffmpeg_pid"
                     return 2
                 fi
             fi
@@ -665,7 +588,7 @@ monitor_progress() {
                 write_log "$job $video_name WARN: Output ($current_mb MB) significantly exceeds original ($original_mb MB), killing transcode"
                 echo "output-too-large" > "$monitor_flag"
                 kill -9 "$ffmpeg_pid" 2>/dev/null || true
-                abort_early_cleanup "$output_path" "$progress_pipe" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" "$ffmpeg_pid"
+                abort_early_cleanup "$output_path" "$progress_file" "$ffmpeg_err_file" "$monitor_flag" "$ffmpeg_pid"
                 return 2
             fi
         fi
@@ -822,7 +745,6 @@ GPU_CHECK_INTERVAL=${CONFIG_GLOBAL["gpu_check_interval"]:-30}
 # Consecutive sub-target evaluations required before granting a scale-up. Guards
 # against transient VCN dips — e.g. a job finishing its encode while still in its
 # file-move phase — being misread as sustained spare capacity.
-GPU_HEADROOM_CONFIRM=${CONFIG_GLOBAL["gpu_headroom_confirm"]:-2}
 VCN_SAMPLE_INTERVAL=${CONFIG_GLOBAL["vcn_sample_interval"]:-10}
 FFMPEG_INPUT_PARAMS=${CONFIG_GLOBAL["ffmpeg_input_params"]:-""}
 FFMPEG_LOGGING=${CONFIG_GLOBAL["ffmpeg_logging"]:-"error"}
@@ -899,10 +821,7 @@ load_skip_file
 # extra slots fill only while gpu_has_headroom=1, and a finished task simply
 # ends — its slot is not refilled unless headroom is granted again.
 gpu_has_headroom=0
-low_vcn_streak=0
-declare -A dispatched_ooo
 video_idx=0
-last_ooo_check=0
 queue_timer=$(date +%s)
 last_job_start=0
 last_scale_check=0
@@ -914,10 +833,6 @@ actual_running=0
 last_wait_log=0
 
 while [[ $video_idx -lt ${#videos[@]} ]]; do
-    if [[ -n "${dispatched_ooo[$video_idx]:-}" ]]; then
-        video_idx=$((video_idx + 1))
-        continue
-    fi
     IFS=',' read -r config_name video size <<<"${videos[$video_idx]}"
     if [[ $RESTART_QUEUE -ne 0 ]]; then
         now=$(date +%s)
@@ -930,7 +845,6 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
             merge_scan_results "$SCAN_RESULTS"
             mapfile -t videos < <(awk -F, '{print $0}' "$SCAN_RESULTS")
             unset skip_lookup; declare -A skip_lookup
-            unset dispatched_ooo; declare -A dispatched_ooo
             load_skip_file
             video_idx=0
             queue_timer=$(date +%s)
@@ -1021,12 +935,7 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                     continue
                 fi
                 
-                # Cache df result (re-read at most once per second)
-                if [[ -z "${shm_cached_free:-}" || -z "${shm_cached_at:-}" || $(($(date +%s) - shm_cached_at)) -ge 1 ]]; then
-                    shm_cached_free=$(df -m /dev/shm | awk 'NR==2 {print $4}')
-                    shm_cached_at=$(date +%s)
-                fi
-                shm_free_mb=$shm_cached_free
+                shm_free_mb=$(df -m /dev/shm | awk 'NR==2 {print $4}')
                 reserved_mb=0
                 for ((t = 1; t <= MAX_THREADS; t++)); do
                     [[ $t -eq $thread ]] && continue
@@ -1039,46 +948,9 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                 done
                 effective_free=$((shm_free_mb - reserved_mb))
 
-                # If other jobs are holding shm and there isn't room for the
-                # current video, try a smaller out-of-order video, else wait.
+                # If other jobs are holding shm and there isn't room, wait.
                 if [[ $reserved_mb -gt 0 && $effective_free -lt $reserve_mb ]]; then
                     now=$(date +%s)
-                    if [[ $((now - last_ooo_check)) -ge 5 ]]; then
-                        last_ooo_check=$now
-                        vcn_ooo=$(get_vcn_utilization)
-                        if [[ $vcn_ooo -lt $GPU_TARGET_PCT && $effective_free -gt 0 ]]; then
-                            for ((la=video_idx+1; la<${#videos[@]}; la++)); do
-                                [[ -n "${dispatched_ooo[$la]:-}" ]] && continue
-                                IFS=',' read -r la_cfg la_vid la_sz <<<"${videos[$la]}"
-                                la_sz_mb=$((la_sz / 1024 / 1024))
-                                la_base="${la_vid##*/}"
-                                [[ -n "${skip_lookup[$la_base]:-}" ]] && continue
-                                [[ ! -f "$la_vid" ]] && continue
-                                [[ $la_sz_mb -lt ${CONFIG_MIN_SIZE[$la_cfg]} ]] && continue
-                                la_reserve=$(calc_reserve "$la_cfg" "$la_sz_mb" "${dur_lookup[$la_vid]:-0}")
-                                if [[ $la_reserve -le $effective_free ]]; then
-                                    write_log "[OOO][T${thread}] $la_base (${la_reserve}MB est) fits shm (${effective_free}MB free) — dispatching ahead of $video_basename (needs ${reserve_mb}MB)"
-                                    run_job_transcode "$la_cfg" "$la_vid" "[T${thread}]" "$la_sz" &
-                                    new_pid=$!
-                                    declare $pid_var=$new_pid
-                                    declare $start_var="$(date +%s)"
-                                    declare "JOB_SIZE_$thread=$la_reserve"
-                                    last_job_start=$(date +%s)
-                                    # Consume the headroom grant; the next
-                                    # scale-up must be re-confirmed by the status
-                                    # check after the ramp wait.
-                                    gpu_has_headroom=0
-                                    low_vcn_streak=0
-                                    dispatched_ooo[$la]=1
-                                    done_flag=1
-                                    break
-                                fi
-                            done
-                        fi
-                    fi
-                    if [[ $done_flag -eq 1 ]]; then
-                        break
-                    fi
                     if [[ $((now - last_wait_log)) -ge $GPU_CHECK_INTERVAL ]]; then
                         echo "[WAIT] /dev/shm ${effective_free}MB available, need ${reserve_mb}MB for $video_basename — waiting for space"
                         last_wait_log=$now
@@ -1097,7 +969,6 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                 # Consume the headroom grant; the next scale-up must be
                 # re-confirmed by the status check after the ramp wait.
                 gpu_has_headroom=0
-                low_vcn_streak=0
                 done_flag=1
                 break
             fi
@@ -1145,40 +1016,25 @@ while [[ $video_idx -lt ${#videos[@]} ]]; do
                 # Nothing running — the base slot starts regardless of any
                 # grant, so there is no extra-slot scale-up to consider.
                 gpu_has_headroom=0
-                low_vcn_streak=0
                 scale_action="idle — starting base task"
             elif [[ $vcn_pct -lt $GPU_TARGET_PCT ]]; then
                 if [[ $actual_running -ge $MAX_THREADS ]]; then
                     gpu_has_headroom=0
-                    low_vcn_streak=0
                     scale_action="at max threads (${MAX_THREADS}/${MAX_THREADS})"
                 elif [[ $effective_free -lt $reserve_mb ]]; then
                     # GPU has headroom but shm is full — adding a task won't
                     # help, the constraint is memory not the GPU.
                     gpu_has_headroom=0
-                    low_vcn_streak=0
                     scale_action="waiting for shm"
                 else
-                    # Spare GPU capacity with room to add a task. Require the
-                    # low reading to persist across consecutive evaluations
-                    # so a transient drain — e.g. a job finishing its encode
-                    # while still in its file-move phase — isn't misread as
-                    # sustained spare capacity and used to scale up.
-                    low_vcn_streak=$((low_vcn_streak + 1))
-                    if [[ $low_vcn_streak -ge $GPU_HEADROOM_CONFIRM ]]; then
-                        gpu_has_headroom=1
-                        scale_action="headroom — scaling up ($((actual_running+1))/${MAX_THREADS})"
-                    else
-                        gpu_has_headroom=0
-                        scale_action="confirming headroom (${low_vcn_streak}/${GPU_HEADROOM_CONFIRM})"
-                    fi
+                    gpu_has_headroom=1
+                    scale_action="headroom — scaling up ($((actual_running+1))/${MAX_THREADS})"
                 fi
             else
-                # GPU at load — withhold the grant and reset the streak.
+                # GPU at load — withhold the grant.
                 # Finished tasks end and their slots are left empty, so
                 # concurrency scales down.
                 gpu_has_headroom=0
-                low_vcn_streak=0
                 scale_action="GPU at load"
             fi
             if [[ $((now - last_status_log)) -ge $GPU_CHECK_INTERVAL ]]; then
