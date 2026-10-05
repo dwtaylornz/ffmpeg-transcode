@@ -9,3 +9,7 @@ variables.ps1
 .env
 .claude/settings.json
 bash/transcode-config.json
+.probe/
+transcode-errors/
+transcode.lock
+*.csv.bak
